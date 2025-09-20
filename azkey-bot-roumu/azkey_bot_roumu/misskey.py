@@ -128,3 +128,18 @@ class Misskey:
         }
         
         return self.post("/api/following/create", payload)
+
+    def get_user_info(self, user_id: str) -> dict:
+        """Get user information by user ID
+        
+        Args:
+            user_id: Target user ID
+            
+        Returns:
+            User information from API
+        """
+        payload = {
+            "userId": user_id
+        }
+        
+        return self.post("/api/users/show", payload)

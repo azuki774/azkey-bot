@@ -4,48 +4,73 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python project called "azkey-bot-roumu" - a roumu bot for azkey.azuki.blue. The project uses modern Python tooling with pyproject.toml for configuration.
+azkey-bot-roumu is a "roumu" (login bonus) bot for azkey.azuki.blue Misskey server. It functions as an SNS login bonus bot that tracks daily check-ins and manages follow-back automation.
 
 ## Development Setup
 
-- **Python Version**: 3.13 (specified in parent project)
-- **Project Structure**: Package-based structure with azkey_bot_roumu/ directory
-- **Configuration**: Uses pyproject.toml for project metadata
+- **Python Version**: 3.13+ (specified in pyproject.toml)
+- **Package Manager**: uv (preferred) or pip
+- **Package Structure**: azkey_bot_roumu/ with modular architecture
+- **Configuration**: Uses pyproject.toml, no build/test/lint scripts defined
 
 ## Running the Application
 
 ```bash
-# Development mode
-cd azkey-bot-roumu
-python -m azkey_bot_roumu.cli --help
+# Development mode with uv
+uv run python -m azkey_bot_roumu.cli <command>
 
 # After installation
-azkey-bot-roumu --help
-```
-
-## Installation
-
-```bash
-cd azkey-bot-roumu
 pip install -e .
+azkey-bot-roumu <command>
 ```
 
 ## CLI Commands
 
 - `azkey-bot-roumu status` - Show current status
+- `azkey-bot-roumu follow` - Execute follow-back automation for Misskey followers
+- `azkey-bot-roumu dakoku --user-id <id>` - Debug command for manual user check-in
 
-## Project Configuration
+## Architecture
 
-- **pyproject.toml**: Contains project metadata, requires Python >=3.13, uses Click for CLI framework
-- **Virtual Environment**: Uses parent project's .venv
+### Core Components
 
-## Architecture Notes
+**Usecases Class** (`usecases.py`): Central business logic coordinator that manages configuration, integrates all services, and provides high-level operations. Acts as the main entry point for commands.
 
-This is a roumu bot for azkey.azuki.blue with:
-- Package structure: azkey_bot_roumu/ with cli.py, commands.py
-- Click-based CLI framework
-- Entry point: azkey_bot_roumu/cli.py (cli function)
-- Basic status command implemented
+**Misskey API Client** (`misskey.py`): Handles all Misskey server communication including follow/unfollow operations, user information retrieval, and notification management.
 
-## 注意事項
-- 常に「Flake8 の空白行警告を修正」を行うようにしてください。
+**RoumuData** (`roumu_data.py`): CSV-based persistence layer for check-in tracking with schema: `user_id`, `username`, `consecutive_count`, `last_checkin`. Implements duplicate check-in prevention and leaderboard functionality.
+
+### Data Flow Architecture
+
+1. **Commands** → **Usecases** → **Misskey API / RoumuData**
+2. Configuration loaded from environment variables (`i`, `OPENROUTER_API_KEY`)
+3. CSV file (`roumu.csv`) automatically created and managed for persistence
+4. Follow-back logic: fetch followers/following → calculate diff → execute follows
+
+### Key Features
+
+- **Follow-back Automation**: Automatically follows users who follow you but aren't followed back
+- **Check-in System**: Daily login bonus tracking with consecutive count and duplicate prevention
+- **Username Resolution**: Automatic username lookup from user IDs via Misskey API
+- **CSV Persistence**: Lightweight data storage for user check-in records
+
+## Environment Variables
+
+Required for API operations:
+- `i`: Misskey access token
+- `OPENROUTER_API_KEY`: OpenRouter API key (for future AI features)
+
+## Code Quality
+
+Always run Flake8 blank line fixes after modifications:
+```bash
+sed -i 's/^[[:space:]]*$//' azkey_bot_roumu/*.py
+```
+
+## Data Schema
+
+CSV file structure in `roumu.csv`:
+- `user_id`: Misskey user identifier
+- `username`: Display name (format: `username@host` or `username`)
+- `consecutive_count`: Number of consecutive check-ins
+- `last_checkin`: ISO timestamp of last check-in (empty = can check-in)

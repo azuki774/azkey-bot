@@ -1,5 +1,5 @@
 import click
-from .commands import status_command, follow_command
+from .commands import status_command, follow_command, dakoku_command
 
 
 @click.group()
@@ -11,6 +11,7 @@ def cli():
 
 cli.add_command(status_command)
 cli.add_command(follow_command)
+cli.add_command(dakoku_command)
 
 
 if __name__ == "__main__":

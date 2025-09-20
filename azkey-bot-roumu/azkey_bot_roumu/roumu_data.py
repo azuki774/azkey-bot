@@ -16,11 +16,14 @@ class RoumuData:
             csv_file_path: Path to the CSV file (default: "roumu.csv")
         """
         self.csv_file_path = csv_file_path
-        self.fieldnames = ["user_id", "username", "consecutive_count", "last_checkin"]
+        self.fieldnames = ["user_id", "consecutive_count", "last_checkin"]
 
         # Create CSV file with headers if it doesn't exist
         if not os.path.exists(self.csv_file_path):
             self._create_csv_file()
+        else:
+            # Check if migration is needed
+            self._migrate_csv_if_needed()
 
     def _create_csv_file(self):
         """Create CSV file with headers"""
@@ -37,9 +40,10 @@ class RoumuData:
         users = []
         try:
             with open(self.csv_file_path, 'r', newline='', encoding='utf-8') as csvfile:
-                reader = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
+                reader = csv.DictReader(csvfile, fieldnames=self.fieldnames)
+                next(reader)  # Skip header row
                 for row in reader:
-                    if row["user_id"]:  # Skip empty rows
+                    if row and row.get("user_id"):  # Skip empty rows
                         users.append(row)
         except FileNotFoundError:
             # File doesn't exist yet, return empty list
@@ -61,12 +65,11 @@ class RoumuData:
                 return user
         return None
 
-    def update_checkin(self, user_id: str, username: str) -> Dict[str, any]:
+    def update_checkin(self, user_id: str) -> Dict[str, any]:
         """Update user check-in data
 
         Args:
             user_id: User ID
-            username: Username for display
 
         Returns:
             Dictionary with update results
@@ -81,7 +84,6 @@ class RoumuData:
                     # User already checked in, return current status without update
                     return {
                         "user_id": user_id,
-                        "username": user["username"],
                         "consecutive_count": int(user["consecutive_count"]) if user["consecutive_count"] else 0,
                         "last_checkin": user["last_checkin"],
                         "was_new_user": False,
@@ -95,7 +97,6 @@ class RoumuData:
             if user["user_id"] == user_id:
                 # Update existing user
                 old_count = int(user["consecutive_count"]) if user["consecutive_count"] else 0
-                user["username"] = username  # Update username in case it changed
                 user["consecutive_count"] = str(old_count + 1)
                 user["last_checkin"] = current_time
                 user_found = True
@@ -105,7 +106,6 @@ class RoumuData:
             # Add new user
             users.append({
                 "user_id": user_id,
-                "username": username,
                 "consecutive_count": "1",
                 "last_checkin": current_time
             })
@@ -117,7 +117,6 @@ class RoumuData:
         updated_user = self.get_user(user_id)
         return {
             "user_id": user_id,
-            "username": username,
             "consecutive_count": int(updated_user["consecutive_count"]),
             "last_checkin": updated_user["last_checkin"],
             "was_new_user": not user_found,

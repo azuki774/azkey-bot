@@ -184,17 +184,16 @@ class Usecases:
             "failure_count": len(failed_follows)
         }
 
-    def checkin_roumu(self, user_id: str, username: str) -> dict:
+    def checkin_roumu(self, user_id: str) -> dict:
         """Record roumu check-in for a user
 
         Args:
             user_id: User ID to check in
-            username: Username for display
 
         Returns:
             Dictionary containing check-in results
         """
-        return self.roumu_data.update_checkin(user_id, username)
+        return self.roumu_data.update_checkin(user_id)
 
     def get_roumu_leaderboard(self, limit: int = 10) -> list:
         """Get roumu leaderboard
@@ -239,3 +238,27 @@ class Usecases:
             Dictionary with reset results
         """
         return self.roumu_data.reset_last_checkin(user_id)
+
+    def get_username_from_userid(self, user_id: str) -> str:
+        """Get username from user ID using Misskey API
+        
+        Args:
+            user_id: Target user ID
+            
+        Returns:
+            Username in format "username@host" or "username" for local users
+            
+        Raises:
+            ValueError: If configuration is not loaded
+        """
+        misskey = self.get_misskey_client()
+        user_info = misskey.get_user_info(user_id)
+        
+        username = user_info.get('username', 'unknown')
+        host = user_info.get('host')
+        
+        # Return format: username@host or just username for local users
+        if host and host != 'local':
+            return f"{username}@{host}"
+        else:
+            return username
