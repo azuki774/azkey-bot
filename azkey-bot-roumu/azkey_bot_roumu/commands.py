@@ -122,17 +122,17 @@ def timeline_command(limit, until_id, verbose):
             user = post.get("user", {})
             username = user.get("username", "unknown")
             name = user.get("name") or username
-            
+
             # Post basic info
             post_id = post.get("id", "")
             created_at = post.get("createdAt", "")
             text = post.get("text", "")
-            
+
             click.echo(f"\n📌 投稿 {i}")
             click.echo(f"👤 {name} (@{username})")
             click.echo(f"🆔 ID: {post_id}")
             click.echo(f"📅 投稿日時: {created_at}")
-            
+
             if text:
                 # Truncate long text
                 display_text = text[:100] + "..." if len(text) > 100 else text
@@ -146,15 +146,15 @@ def timeline_command(limit, until_id, verbose):
                 if reactions:
                     reaction_summary = ", ".join([f"{k}: {v}" for k, v in reactions.items()])
                     click.echo(f"💝 リアクション: {reaction_summary}")
-                
+
                 files = post.get("files", [])
                 if files:
                     click.echo(f"📎 添付ファイル: {len(files)}個")
-                
+
                 reply_id = post.get("replyId")
                 if reply_id:
                     click.echo(f"💬 返信先: {reply_id}")
-                
+
                 renote_id = post.get("renoteId")
                 if renote_id:
                     click.echo(f"🔄 リノート元: {renote_id}")
@@ -166,6 +166,134 @@ def timeline_command(limit, until_id, verbose):
             last_post_id = timeline[-1].get("id")
             click.echo(f"\n🔄 次のページ取得用ID: {last_post_id}")
             click.echo(f"💡 コマンド例: azkey-bot-roumu timeline --limit {limit} --until-id {last_post_id}")
+
+    except ValueError as e:
+        click.echo(f"設定エラー: {e}", err=True)
+    except Exception as e:
+        click.echo(f"エラーが発生しました: {e}", err=True)
+
+
+@click.command("check")
+def check_command():
+    """Check timeline for keywords and perform dakoku for matching users"""
+    # 検索対象キーワード（定数として定義）
+    TARGET_KEYWORDS = [
+        "ログインボーナス",
+        "ログボ",
+        "打刻"
+    ]
+
+    try:
+        # Load configuration
+        usecases = Usecases()
+        usecases.load_environment_variables()
+
+        click.echo("🔍 タイムライン取得中...")
+        click.echo(f"🔍 検索キーワード: {', '.join(TARGET_KEYWORDS)}")
+
+        # Get timeline (最近100件)
+        timeline = usecases.get_timeline(limit=100)
+
+        if not timeline:
+            click.echo("📭 タイムラインが空です")
+            return
+
+        click.echo(f"📝 取得したタイムライン: {len(timeline)}件")
+
+        # キーワードが含まれているノートを抽出
+        matching_posts = []
+        for post in timeline:
+            text = post.get("text", "")
+            if text:
+                # いずれかのキーワードが含まれているかチェック
+                for keyword in TARGET_KEYWORDS:
+                    if keyword in text:
+                        matching_posts.append(post)
+                        break  # 一つでもマッチしたら追加して次の投稿へ
+
+        click.echo(f"🎯 キーワードが含まれる投稿: {len(matching_posts)}件")
+
+        if not matching_posts:
+            click.echo("🔍 該当する投稿が見つかりませんでした")
+            return
+
+        click.echo("=" * 50)
+
+        # 打刻処理
+        successful_checkins = []
+        failed_checkins = []
+        already_checked_in = []
+
+        for i, post in enumerate(matching_posts, 1):
+            user = post.get("user", {})
+            user_id = user.get("id", "")
+            username = user.get("username", "unknown")
+            name = user.get("name") or username
+            text = post.get("text", "")
+
+            # マッチしたキーワードを特定
+            matched_keyword = ""
+            for keyword in TARGET_KEYWORDS:
+                if keyword in text:
+                    matched_keyword = keyword
+                    break
+
+            click.echo(f"\n📌 該当投稿 {i}")
+            click.echo(f"👤 {name} (@{username})")
+            click.echo(f"🆔 ユーザーID: {user_id}")
+            click.echo(f"🎯 マッチしたキーワード: {matched_keyword}")
+            display_text = text[:50] + "..." if len(text) > 50 else text
+            click.echo(f"📝 内容: {display_text}")
+
+            if not user_id:
+                click.echo("⚠️  ユーザーIDが取得できませんでした")
+                failed_checkins.append({"user_id": user_id, "username": username, "error": "ユーザーID不明"})
+                continue
+
+            # 打刻実行
+            try:
+                result = usecases.checkin_roumu(user_id)
+
+                if result.get("already_checked_in", False):
+                    click.echo("⚠️  既に本日打刻済みです")
+                    already_checked_in.append({"user_id": user_id, "username": username})
+                else:
+                    click.echo("✅ 打刻完了!")
+                    click.echo(f"🔢 連続回数: {result['consecutive_count']}回")
+                    if result.get("was_new_user", False):
+                        click.echo("🆕 新規ユーザーです")
+                    successful_checkins.append({"user_id": user_id, "username": username, "consecutive_count": result['consecutive_count']})
+
+            except Exception as e:
+                click.echo(f"❌ 打刻失敗: {e}")
+                failed_checkins.append({"user_id": user_id, "username": username, "error": str(e)})
+
+            click.echo("-" * 30)
+
+        # 結果サマリー
+        click.echo("=" * 50)
+        click.echo("📊 打刻処理結果:")
+        click.echo(f"  🎯 該当投稿: {len(matching_posts)}件")
+        click.echo(f"  ✅ 新規打刻: {len(successful_checkins)}人")
+        click.echo(f"  ⚠️  既に打刻済み: {len(already_checked_in)}人")
+        click.echo(f"  ❌ 失敗: {len(failed_checkins)}人")
+
+        if successful_checkins:
+            click.echo("\n✅ 新規打刻成功:")
+            for checkin in successful_checkins:
+                click.echo(f"  - {checkin['username']} (連続{checkin['consecutive_count']}回)")
+
+        if already_checked_in:
+            click.echo("\n⚠️  既に打刻済み:")
+            for checkin in already_checked_in:
+                click.echo(f"  - {checkin['username']}")
+
+        if failed_checkins:
+            click.echo("\n❌ 打刻失敗:")
+            for failed in failed_checkins:
+                click.echo(f"  - {failed['username']}: {failed['error']}")
+
+        click.echo("\n📊 CSV ファイル 'roumu.csv' に記録されました")
 
     except ValueError as e:
         click.echo(f"設定エラー: {e}", err=True)

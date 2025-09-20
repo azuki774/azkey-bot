@@ -1,6 +1,6 @@
 import click
 
-from .commands import dakoku_command, follow_command, status_command, timeline_command
+from .commands import check_command, dakoku_command, follow_command, status_command, timeline_command
 
 
 @click.group()
@@ -14,6 +14,7 @@ cli.add_command(status_command)
 cli.add_command(follow_command)
 cli.add_command(dakoku_command)
 cli.add_command(timeline_command)
+cli.add_command(check_command)
 
 
 if __name__ == "__main__":
