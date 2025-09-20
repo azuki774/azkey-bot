@@ -1,0 +1,14 @@
+[project]
+name = "azkey-bot-roumu"
+version = "0.1.0"
+description = "roumu bot for azkey.azuki.blue"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.0.0",
+    "requests>=2.28.0",
+    "openai>=1.0.0",
+]
+
+[project.scripts]
+azkey-bot-roumu = "azkey_bot_roumu.cli:cli"

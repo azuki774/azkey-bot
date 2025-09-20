@@ -68,3 +68,28 @@ def next_command(user_id, limit, total_count, post):
         click.echo(f"Error: {e}", err=True)
     except Exception as e:
         click.echo(f"Error making request: {e}", err=True)
+
+
+@click.command("random")
+@click.option("--post", is_flag=True, help="Post generated note to Misskey")
+def random_command(post):
+    """Generate random note"""
+    try:
+        # TODO: Implement random note generation logic
+        random_note = "ランダムノート生成機能は実装中です"
+        
+        click.echo("=== 生成されたランダムノート ===")
+        click.echo(random_note)
+        click.echo("=" * 30)
+        
+        if post:
+            click.echo("📝 投稿中...")
+            result = create_note(text=random_note)
+            click.echo(f"✅ 投稿が完了しました: {result.get('createdNote', {}).get('id', 'Unknown')}")
+        else:
+            click.echo("💡 投稿するには --post オプションを追加してください")
+            
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+    except Exception as e:
+        click.echo(f"Error making request: {e}", err=True)
