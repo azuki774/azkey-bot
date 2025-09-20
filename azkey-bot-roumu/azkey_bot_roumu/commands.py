@@ -20,7 +20,7 @@ def follow_command(limit):
         result = usecases.follow_back()
 
         click.echo("=" * 50)
-        click.echo(f"📊 フォローバック結果:")
+        click.echo("📊 フォローバック結果:")
         click.echo(f"  👥 フォロワー数: {result['total_followers']}人")
         click.echo(f"  ➡️  フォロー中: {result['total_following']}人")
         click.echo(f"  🔄 フォローバック対象: {result['users_to_follow_back']}人")
