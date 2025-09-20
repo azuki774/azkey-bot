@@ -49,8 +49,7 @@ def analyze_with_ai(analysis_result: str) -> str:
 -------------------------------
 # あずきインターネット評価
 
-- 評価日時： xxxx年xx月xx日
-- 評価対象者： xxxxxxxxxxxx
+- 評価対象者：
 - 評価期間：投稿データに基づく過去履歴(xxxx年xx月xx日 - xxxx年xx月xx日)
 - 評価者：あずきインターネット人事部
 
