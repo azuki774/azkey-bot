@@ -1,0 +1,14 @@
+[project]
+name = "azkey-bot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.0.0",
+    "requests>=2.28.0",
+    "openai>=1.0.0",
+]
+
+[project.scripts]
+azkey-bot = "azkey_bot.cli:cli"
