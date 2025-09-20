@@ -26,7 +26,8 @@ def analyze_with_ai(analysis_result: str) -> str:
         api_key=api_key,
     )
     
-    prompt = f"""以下は日本のソーシャルメディア（Misskey）の投稿データです。
+    prompt = f"""
+以下は日本のソーシャルメディア（Misskey）の投稿データです。
 このデータを分析して、以下の観点から洞察を提供してください：
 
 1. 投稿の傾向や特徴
@@ -46,7 +47,7 @@ def analyze_with_ai(analysis_result: str) -> str:
             messages=[
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
+            max_tokens=4048,
             temperature=0.7
         )
         return completion.choices[0].message.content
