@@ -113,3 +113,41 @@ def get_latest_notes_since(user_id, since_id=None, limit=100):
         limit=limit,
         since_id=since_id
     )
+
+
+def create_note(text: str, cw: str = None) -> dict:
+    """Create a new note on Misskey
+    
+    Args:
+        text: Note content
+        cw: Content warning text (optional)
+        
+    Returns:
+        JSON response data
+        
+    Raises:
+        ValueError: If access token is not set
+        requests.RequestException: If API request fails
+    """
+    access_token = os.getenv("i")
+    if not access_token:
+        raise ValueError("Environment variable 'i' is not set")
+
+    url = "https://azkey.azuki.blue/api/notes/create"
+
+    payload = {
+        "text": text,
+        "i": access_token
+    }
+    
+    if cw:
+        payload["cw"] = cw
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+
+    return response.json()

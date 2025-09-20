@@ -1,6 +1,6 @@
 import click
 from .analyzer import NoteAnalyzer
-from .misskey import get_all_notes_paginated
+from .misskey import get_all_notes_paginated, create_note
 
 
 @click.command("status")
@@ -14,7 +14,8 @@ def status_command():
 @click.option("--with-replies", is_flag=True, default=True, help="Include replies")
 @click.option("--analyze", is_flag=True, help="Analyze the response data")
 @click.option("--total-count", default=500, help="Total number of notes to fetch when paginating")
-def get_command(user_id, limit, with_replies, analyze, total_count):
+@click.option("--post", is_flag=True, help="Post analysis result to Misskey")
+def get_command(user_id, limit, with_replies, analyze, total_count, post):
     """Get user notes from azkey.azuki.blue API"""
     try:
         data = get_all_notes_paginated(user_id, total_count, limit)
@@ -22,6 +23,15 @@ def get_command(user_id, limit, with_replies, analyze, total_count):
         analysis_result = NoteAnalyzer.analyze(data)
         click.echo("=== Analysis Results ===")
         click.echo(analysis_result)
+
+        if post:
+            # Post analysis result to Misskey
+            click.echo("\n投稿中...")
+            result = create_note(
+                text=analysis_result,
+                cw=f"あずきインターネット評価書 ({user_id})"
+            )
+            click.echo(f"投稿が完了しました: {result.get('createdNote', {}).get('id', 'Unknown')}")
 
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)

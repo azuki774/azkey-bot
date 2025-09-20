@@ -3,6 +3,7 @@
 import os
 from openai import OpenAI
 
+
 def analyze_with_ai(analysis_result: str) -> str:
     """Analyze data using OpenRouter AI
 
