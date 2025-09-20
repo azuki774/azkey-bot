@@ -46,3 +46,6 @@ This is a roumu bot for azkey.azuki.blue with:
 - Click-based CLI framework
 - Entry point: azkey_bot_roumu/cli.py (cli function)
 - Basic status command implemented
+
+## 注意事項
+- 常に「Flake8 の空白行警告を修正」を行うようにしてください。

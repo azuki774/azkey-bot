@@ -1,6 +1,7 @@
 """Usecases class for azkey-bot-roumu"""
 
 import os
+from .roumu_data import RoumuData
 
 
 class Usecases:
@@ -11,6 +12,7 @@ class Usecases:
         self.i = None
         self.openrouter_api_key = None
         self.misskey_endpoint = "https://azkey.azuki.blue"
+        self.roumu_data = RoumuData()
 
     def load_environment_variables(self):
         """Load environment variables i and OPENROUTER_API_KEY
@@ -181,3 +183,59 @@ class Usecases:
             "success_count": len(successful_follows),
             "failure_count": len(failed_follows)
         }
+
+    def checkin_roumu(self, user_id: str, username: str) -> dict:
+        """Record roumu check-in for a user
+
+        Args:
+            user_id: User ID to check in
+            username: Username for display
+
+        Returns:
+            Dictionary containing check-in results
+        """
+        return self.roumu_data.update_checkin(user_id, username)
+
+    def get_roumu_leaderboard(self, limit: int = 10) -> list:
+        """Get roumu leaderboard
+
+        Args:
+            limit: Maximum number of users to return (default: 10)
+
+        Returns:
+            List of users sorted by consecutive count
+        """
+        return self.roumu_data.get_leaderboard(limit)
+
+    def get_roumu_user_status(self, user_id: str) -> dict:
+        """Get specific user's roumu status
+
+        Args:
+            user_id: Target user ID
+
+        Returns:
+            User's roumu data or None if not found
+        """
+        return self.roumu_data.get_user(user_id)
+
+    def reset_roumu_count(self, user_id: str) -> bool:
+        """Reset user's consecutive roumu count
+
+        Args:
+            user_id: Target user ID
+
+        Returns:
+            True if reset successful, False if user not found
+        """
+        return self.roumu_data.reset_consecutive_count(user_id)
+
+    def reset_roumu_checkin(self, user_id: str = None) -> dict:
+        """Reset user's last check-in (allows new check-in)
+
+        Args:
+            user_id: Target user ID, if None resets all users
+
+        Returns:
+            Dictionary with reset results
+        """
+        return self.roumu_data.reset_last_checkin(user_id)
