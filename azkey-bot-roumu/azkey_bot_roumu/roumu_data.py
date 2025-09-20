@@ -20,9 +20,6 @@ class RoumuData:
         # Create CSV file with headers if it doesn't exist
         if not os.path.exists(self.csv_file_path):
             self._create_csv_file()
-        else:
-            # Check if migration is needed
-            self._migrate_csv_if_needed()
 
     def _create_csv_file(self):
         """Create CSV file with headers"""

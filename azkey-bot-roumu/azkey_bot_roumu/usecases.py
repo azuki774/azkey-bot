@@ -265,3 +265,19 @@ class Usecases:
             return f"{username}@{host}"
         else:
             return username
+
+    def get_timeline(self, limit: int = 100, until_id: str = None) -> dict:
+        """Get timeline posts
+
+        Args:
+            limit: Number of posts to fetch (default: 100)
+            until_id: Get posts before this ID for pagination
+
+        Returns:
+            API response containing timeline posts
+
+        Raises:
+            ValueError: If configuration is not loaded
+        """
+        misskey = self.get_misskey_client()
+        return misskey.get_timeline(limit=limit, until_id=until_id)

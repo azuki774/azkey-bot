@@ -89,3 +89,85 @@ def dakoku_command(user_id):
 
     except Exception as e:
         click.echo(f"エラーが発生しました: {e}", err=True)
+
+
+@click.command("timeline")
+@click.option("--limit", default=10, help="Number of posts to fetch (default: 10)")
+@click.option("--until-id", help="Get posts before this ID (for pagination)")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed post information")
+def timeline_command(limit, until_id, verbose):
+    """Debug command: Fetch and display timeline posts"""
+    try:
+        # Load configuration
+        usecases = Usecases()
+        usecases.load_environment_variables()
+
+        click.echo("🔍 タイムライン取得中...")
+        click.echo(f"📊 取得件数: {limit}件")
+        if until_id:
+            click.echo(f"🔄 ページネーション: {until_id} より前")
+
+        # Get timeline
+        timeline = usecases.get_timeline(limit=limit, until_id=until_id)
+
+        if not timeline:
+            click.echo("📭 タイムラインが空です")
+            return
+
+        click.echo("=" * 60)
+        click.echo(f"📝 取得したタイムライン: {len(timeline)}件")
+        click.echo("=" * 60)
+
+        for i, post in enumerate(timeline, 1):
+            user = post.get("user", {})
+            username = user.get("username", "unknown")
+            name = user.get("name") or username
+            
+            # Post basic info
+            post_id = post.get("id", "")
+            created_at = post.get("createdAt", "")
+            text = post.get("text", "")
+            
+            click.echo(f"\n📌 投稿 {i}")
+            click.echo(f"👤 {name} (@{username})")
+            click.echo(f"🆔 ID: {post_id}")
+            click.echo(f"📅 投稿日時: {created_at}")
+            
+            if text:
+                # Truncate long text
+                display_text = text[:100] + "..." if len(text) > 100 else text
+                click.echo(f"📝 内容: {display_text}")
+            else:
+                click.echo("📝 内容: (テキストなし)")
+
+            if verbose:
+                # Show additional details
+                reactions = post.get("reactions", {})
+                if reactions:
+                    reaction_summary = ", ".join([f"{k}: {v}" for k, v in reactions.items()])
+                    click.echo(f"💝 リアクション: {reaction_summary}")
+                
+                files = post.get("files", [])
+                if files:
+                    click.echo(f"📎 添付ファイル: {len(files)}個")
+                
+                reply_id = post.get("replyId")
+                if reply_id:
+                    click.echo(f"💬 返信先: {reply_id}")
+                
+                renote_id = post.get("renoteId")
+                if renote_id:
+                    click.echo(f"🔄 リノート元: {renote_id}")
+
+            click.echo("-" * 40)
+
+        # Show last post ID for pagination
+        if timeline:
+            last_post_id = timeline[-1].get("id")
+            click.echo(f"\n🔄 次のページ取得用ID: {last_post_id}")
+            click.echo(f"💡 コマンド例: azkey-bot-roumu timeline --limit {limit} --until-id {last_post_id}")
+
+    except ValueError as e:
+        click.echo(f"設定エラー: {e}", err=True)
+    except Exception as e:
+        click.echo(f"エラーが発生しました: {e}", err=True)

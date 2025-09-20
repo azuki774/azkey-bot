@@ -135,3 +135,20 @@ class Misskey:
         payload = {"userId": user_id}
 
         return self.post("/api/users/show", payload)
+
+    def get_timeline(self, limit: int = 100, until_id: str = None) -> dict:
+        """Get timeline posts
+
+        Args:
+            limit: Number of posts to fetch (default: 100)
+            until_id: Get posts before this ID for pagination
+
+        Returns:
+            API response containing timeline posts
+        """
+        payload = {"limit": limit}
+        
+        if until_id:
+            payload["untilId"] = until_id
+
+        return self.post("/api/notes/timeline", payload)
