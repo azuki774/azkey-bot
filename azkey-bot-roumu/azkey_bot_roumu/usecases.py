@@ -1,6 +1,7 @@
 """Usecases class for azkey-bot-roumu"""
 
 import os
+
 from .roumu_data import RoumuData
 
 
@@ -49,7 +50,9 @@ class Usecases:
         from .misskey import Misskey
 
         if not self.is_configured():
-            raise ValueError("Configuration not loaded. Call load_environment_variables() first.")
+            raise ValueError(
+                "Configuration not loaded. Call load_environment_variables() first."
+            )
 
         return Misskey(self.misskey_endpoint, self.i)
 
@@ -181,7 +184,7 @@ class Usecases:
             "successful_follows": successful_follows,
             "failed_follows": failed_follows,
             "success_count": len(successful_follows),
-            "failure_count": len(failed_follows)
+            "failure_count": len(failed_follows),
         }
 
     def checkin_roumu(self, user_id: str) -> dict:
@@ -241,24 +244,24 @@ class Usecases:
 
     def get_username_from_userid(self, user_id: str) -> str:
         """Get username from user ID using Misskey API
-        
+
         Args:
             user_id: Target user ID
-            
+
         Returns:
             Username in format "username@host" or "username" for local users
-            
+
         Raises:
             ValueError: If configuration is not loaded
         """
         misskey = self.get_misskey_client()
         user_info = misskey.get_user_info(user_id)
-        
-        username = user_info.get('username', 'unknown')
-        host = user_info.get('host')
-        
+
+        username = user_info.get("username", "unknown")
+        host = user_info.get("host")
+
         # Return format: username@host or just username for local users
-        if host and host != 'local':
+        if host and host != "local":
             return f"{username}@{host}"
         else:
             return username

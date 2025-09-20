@@ -62,9 +62,23 @@ Required for API operations:
 
 ## Code Quality
 
-Always run Flake8 blank line fixes after modifications:
+This project uses Ruff for linting and formatting. Install and run:
+
 ```bash
-sed -i 's/^[[:space:]]*$//' azkey_bot_roumu/*.py
+# Install dev dependencies
+uv add --dev ruff
+
+# Check code quality
+uv run ruff check
+
+# Auto-fix issues
+uv run ruff check --fix
+
+# Format code
+uv run ruff format
+
+# Check and fix everything
+uv run ruff check --fix && uv run ruff format
 ```
 
 ## Data Schema

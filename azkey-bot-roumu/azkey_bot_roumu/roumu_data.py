@@ -3,7 +3,6 @@
 import csv
 import os
 from datetime import datetime
-from typing import Dict, List, Optional
 
 
 class RoumuData:
@@ -27,11 +26,11 @@ class RoumuData:
 
     def _create_csv_file(self):
         """Create CSV file with headers"""
-        with open(self.csv_file_path, 'w', newline='', encoding='utf-8') as csvfile:
+        with open(self.csv_file_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
             writer.writeheader()
 
-    def load_all_users(self) -> List[Dict[str, str]]:
+    def load_all_users(self) -> list[dict[str, str]]:
         """Load all user data from CSV
 
         Returns:
@@ -39,7 +38,7 @@ class RoumuData:
         """
         users = []
         try:
-            with open(self.csv_file_path, 'r', newline='', encoding='utf-8') as csvfile:
+            with open(self.csv_file_path, newline="", encoding="utf-8") as csvfile:
                 reader = csv.DictReader(csvfile, fieldnames=self.fieldnames)
                 next(reader)  # Skip header row
                 for row in reader:
@@ -50,7 +49,7 @@ class RoumuData:
             pass
         return users
 
-    def get_user(self, user_id: str) -> Optional[Dict[str, str]]:
+    def get_user(self, user_id: str) -> dict[str, str] | None:
         """Get specific user data by user_id
 
         Args:
@@ -65,7 +64,7 @@ class RoumuData:
                 return user
         return None
 
-    def update_checkin(self, user_id: str) -> Dict[str, any]:
+    def update_checkin(self, user_id: str) -> dict[str, any]:
         """Update user check-in data
 
         Args:
@@ -84,10 +83,12 @@ class RoumuData:
                     # User already checked in, return current status without update
                     return {
                         "user_id": user_id,
-                        "consecutive_count": int(user["consecutive_count"]) if user["consecutive_count"] else 0,
+                        "consecutive_count": int(user["consecutive_count"])
+                        if user["consecutive_count"]
+                        else 0,
                         "last_checkin": user["last_checkin"],
                         "was_new_user": False,
-                        "already_checked_in": True
+                        "already_checked_in": True,
                     }
                 break
 
@@ -96,7 +97,9 @@ class RoumuData:
         for user in users:
             if user["user_id"] == user_id:
                 # Update existing user
-                old_count = int(user["consecutive_count"]) if user["consecutive_count"] else 0
+                old_count = (
+                    int(user["consecutive_count"]) if user["consecutive_count"] else 0
+                )
                 user["consecutive_count"] = str(old_count + 1)
                 user["last_checkin"] = current_time
                 user_found = True
@@ -104,11 +107,13 @@ class RoumuData:
 
         if not user_found:
             # Add new user
-            users.append({
-                "user_id": user_id,
-                "consecutive_count": "1",
-                "last_checkin": current_time
-            })
+            users.append(
+                {
+                    "user_id": user_id,
+                    "consecutive_count": "1",
+                    "last_checkin": current_time,
+                }
+            )
 
         # Write back to CSV
         self._save_all_users(users)
@@ -120,7 +125,7 @@ class RoumuData:
             "consecutive_count": int(updated_user["consecutive_count"]),
             "last_checkin": updated_user["last_checkin"],
             "was_new_user": not user_found,
-            "already_checked_in": False
+            "already_checked_in": False,
         }
 
     def reset_consecutive_count(self, user_id: str) -> bool:
@@ -175,22 +180,22 @@ class RoumuData:
 
         return {
             "reset_count": reset_count,
-            "target": "all users" if user_id is None else f"user {user_id}"
+            "target": "all users" if user_id is None else f"user {user_id}",
         }
 
-    def _save_all_users(self, users: List[Dict[str, str]]):
+    def _save_all_users(self, users: list[dict[str, str]]):
         """Save all user data to CSV
 
         Args:
             users: List of user dictionaries to save
         """
-        with open(self.csv_file_path, 'w', newline='', encoding='utf-8') as csvfile:
+        with open(self.csv_file_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
             writer.writeheader()
             for user in users:
                 writer.writerow(user)
 
-    def get_leaderboard(self, limit: int = 10) -> List[Dict[str, any]]:
+    def get_leaderboard(self, limit: int = 10) -> list[dict[str, any]]:
         """Get leaderboard sorted by consecutive count
 
         Args:
@@ -203,9 +208,13 @@ class RoumuData:
 
         # Convert consecutive_count to int for sorting
         for user in users:
-            user["consecutive_count_int"] = int(user["consecutive_count"]) if user["consecutive_count"] else 0
+            user["consecutive_count_int"] = (
+                int(user["consecutive_count"]) if user["consecutive_count"] else 0
+            )
 
         # Sort by consecutive count (descending)
-        sorted_users = sorted(users, key=lambda x: x["consecutive_count_int"], reverse=True)
+        sorted_users = sorted(
+            users, key=lambda x: x["consecutive_count_int"], reverse=True
+        )
 
         return sorted_users[:limit]

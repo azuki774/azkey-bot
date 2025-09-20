@@ -1,4 +1,5 @@
 import click
+
 from .usecases import Usecases
 
 
@@ -27,17 +28,17 @@ def follow_command(limit):
         click.echo(f"  ✅ 成功: {result['success_count']}人")
         click.echo(f"  ❌ 失敗: {result['failure_count']}人")
 
-        if result['successful_follows']:
+        if result["successful_follows"]:
             click.echo("\n✅ フォローバック成功:")
-            for user_id in result['successful_follows']:
+            for user_id in result["successful_follows"]:
                 click.echo(f"  - {user_id}")
 
-        if result['failed_follows']:
+        if result["failed_follows"]:
             click.echo("\n❌ フォローバック失敗:")
-            for failed in result['failed_follows']:
+            for failed in result["failed_follows"]:
                 click.echo(f"  - {failed['follow_id']}: {failed['error']}")
 
-        if result['users_to_follow_back'] == 0:
+        if result["users_to_follow_back"] == 0:
             click.echo("\n🎉 すべてのフォロワーを既にフォロー済みです！")
 
     except ValueError as e:
@@ -71,7 +72,7 @@ def dakoku_command(user_id):
         result = usecases.checkin_roumu(user_id)
 
         click.echo("=" * 50)
-        if result.get('already_checked_in', False):
+        if result.get("already_checked_in", False):
             click.echo("⚠️  既に本日打刻済みです")
             click.echo(f"👤 ユーザー名: {username}")
             click.echo(f"📅 前回打刻: {result['last_checkin']}")
@@ -81,7 +82,7 @@ def dakoku_command(user_id):
             click.echo(f"👤 ユーザー名: {username}")
             click.echo(f"📅 打刻時刻: {result['last_checkin']}")
             click.echo(f"🔢 連続回数: {result['consecutive_count']}回")
-            if result.get('was_new_user', False):
+            if result.get("was_new_user", False):
                 click.echo("🆕 新規ユーザーです")
 
         click.echo("\n📊 CSV ファイル 'roumu.csv' に記録されました")

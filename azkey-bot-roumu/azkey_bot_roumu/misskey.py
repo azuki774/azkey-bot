@@ -19,11 +19,9 @@ class Misskey:
         if not i:
             raise ValueError("Access token 'i' is required")
 
-        self.misskey_endpoint = misskey_url.rstrip('/')  # Remove trailing slash
+        self.misskey_endpoint = misskey_url.rstrip("/")  # Remove trailing slash
         self.i = i
-        self.headers = {
-            "Content-Type": "application/json"
-        }
+        self.headers = {"Content-Type": "application/json"}
 
     def get_api_url(self, endpoint_path: str) -> str:
         """Get full API URL
@@ -34,8 +32,8 @@ class Misskey:
         Returns:
             Full API URL
         """
-        if not endpoint_path.startswith('/'):
-            endpoint_path = '/' + endpoint_path
+        if not endpoint_path.startswith("/"):
+            endpoint_path = "/" + endpoint_path
         return f"{self.misskey_endpoint}{endpoint_path}"
 
     def post(self, endpoint_path: str, data: dict = None) -> dict:
@@ -60,55 +58,53 @@ class Misskey:
         payload["i"] = self.i
 
         response = requests.post(url, headers=self.headers, json=payload)
-        
+
         if not response.ok:
             # エラーレスポンスの詳細を含める
             try:
                 error_detail = response.json()
-                raise requests.RequestException(f"HTTP {response.status_code}: {error_detail}")
+                raise requests.RequestException(
+                    f"HTTP {response.status_code}: {error_detail}"
+                )
             except ValueError:
                 # JSONパースできない場合
-                raise requests.RequestException(f"HTTP {response.status_code}: {response.text}")
-        
+                raise requests.RequestException(
+                    f"HTTP {response.status_code}: {response.text}"
+                ) from None
+
         return response.json()
 
     def get_followers(self, user_id: str, limit: int = 100) -> dict:
         """Get user's followers list
-        
+
         Args:
             user_id: Target user ID to get followers
             limit: Number of followers to fetch (default: 100)
-            
+
         Returns:
             API response containing followers list
         """
-        payload = {
-            "userId": user_id,
-            "limit": limit
-        }
-        
+        payload = {"userId": user_id, "limit": limit}
+
         return self.post("/api/users/followers", payload)
 
     def get_following(self, user_id: str, limit: int = 100) -> dict:
         """Get user's following list
-        
+
         Args:
             user_id: Target user ID to get following list
             limit: Number of following users to fetch (default: 100)
-            
+
         Returns:
             API response containing following list
         """
-        payload = {
-            "userId": user_id,
-            "limit": limit
-        }
-        
+        payload = {"userId": user_id, "limit": limit}
+
         return self.post("/api/users/following", payload)
 
     def get_my_info(self) -> dict:
         """Get current user's information
-        
+
         Returns:
             API response containing current user's information
         """
@@ -116,30 +112,26 @@ class Misskey:
 
     def follow_user(self, user_id: str) -> dict:
         """Follow a user
-        
+
         Args:
             user_id: Target user ID to follow
-            
+
         Returns:
             API response
         """
-        payload = {
-            "userId": user_id
-        }
-        
+        payload = {"userId": user_id}
+
         return self.post("/api/following/create", payload)
 
     def get_user_info(self, user_id: str) -> dict:
         """Get user information by user ID
-        
+
         Args:
             user_id: Target user ID
-            
+
         Returns:
             User information from API
         """
-        payload = {
-            "userId": user_id
-        }
-        
+        payload = {"userId": user_id}
+
         return self.post("/api/users/show", payload)

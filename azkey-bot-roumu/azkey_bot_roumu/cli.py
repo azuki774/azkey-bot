@@ -1,5 +1,6 @@
 import click
-from .commands import status_command, follow_command, dakoku_command
+
+from .commands import dakoku_command, follow_command, status_command
 
 
 @click.group()
