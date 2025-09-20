@@ -1,9 +1,11 @@
 import json
+from .openrouter import analyze_with_ai
 
 
 class NoteAnalyzer:
     def analyze(data):
-        pass
+        ai_analysis_result = analyze_with_ai(data)
+        return ai_analysis_result
 
     def extract(data):
         results = []
