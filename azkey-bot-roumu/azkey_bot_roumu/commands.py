@@ -230,6 +230,7 @@ def check_command():
             username = user.get("username", "unknown")
             name = user.get("name") or username
             text = post.get("text", "")
+            post_id = post.get("id", "")
 
             # マッチしたキーワードを特定
             matched_keyword = ""
@@ -241,13 +242,14 @@ def check_command():
             click.echo(f"\n📌 該当投稿 {i}")
             click.echo(f"👤 {name} (@{username})")
             click.echo(f"🆔 ユーザーID: {user_id}")
+            click.echo(f"📝 ノートID: {post_id}")
             click.echo(f"🎯 マッチしたキーワード: {matched_keyword}")
             display_text = text[:50] + "..." if len(text) > 50 else text
             click.echo(f"📝 内容: {display_text}")
 
             if not user_id:
                 click.echo("⚠️  ユーザーIDが取得できませんでした")
-                failed_checkins.append({"user_id": user_id, "username": username, "error": "ユーザーID不明"})
+                failed_checkins.append({"user_id": user_id, "username": username, "note_id": post_id, "error": "ユーザーID不明"})
                 continue
 
             # 打刻実行
@@ -256,17 +258,26 @@ def check_command():
 
                 if result.get("already_checked_in", False):
                     click.echo("⚠️  既に本日打刻済みです")
-                    already_checked_in.append({"user_id": user_id, "username": username})
+                    already_checked_in.append({"user_id": user_id, "username": username, "note_id": post_id})
                 else:
                     click.echo("✅ 打刻完了!")
+                    click.echo(f"📝 根拠ノートID: {post_id}")
                     click.echo(f"🔢 連続回数: {result['consecutive_count']}回")
                     if result.get("was_new_user", False):
                         click.echo("🆕 新規ユーザーです")
-                    successful_checkins.append({"user_id": user_id, "username": username, "consecutive_count": result['consecutive_count']})
+                    
+                    # 根拠ノートにリアクションを追加
+                    try:
+                        usecases.add_reaction_to_note(post_id, "👍")
+                        click.echo("👍 リアクションを追加しました")
+                    except Exception as reaction_error:
+                        click.echo(f"⚠️  リアクション追加に失敗: {reaction_error}")
+                    
+                    successful_checkins.append({"user_id": user_id, "username": username, "note_id": post_id, "consecutive_count": result['consecutive_count']})
 
             except Exception as e:
                 click.echo(f"❌ 打刻失敗: {e}")
-                failed_checkins.append({"user_id": user_id, "username": username, "error": str(e)})
+                failed_checkins.append({"user_id": user_id, "username": username, "note_id": post_id, "error": str(e)})
 
             click.echo("-" * 30)
 

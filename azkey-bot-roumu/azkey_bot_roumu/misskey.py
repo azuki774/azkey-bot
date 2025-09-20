@@ -152,3 +152,28 @@ class Misskey:
             payload["untilId"] = until_id
 
         return self.post("/api/notes/timeline", payload)
+
+    def add_reaction(self, note_id: str, reaction: str) -> dict:
+        """Add reaction to a note
+
+        Args:
+            note_id: Target note ID to add reaction
+            reaction: Reaction emoji (e.g., "👍", "❤️", "😀")
+
+        Returns:
+            API response
+
+        Raises:
+            ValueError: If required parameters are not provided
+        """
+        if not note_id:
+            raise ValueError("note_id is required")
+        if not reaction:
+            raise ValueError("reaction is required")
+
+        payload = {
+            "noteId": note_id,
+            "reaction": reaction
+        }
+
+        return self.post("/api/notes/reactions/create", payload)

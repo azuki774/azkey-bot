@@ -281,3 +281,19 @@ class Usecases:
         """
         misskey = self.get_misskey_client()
         return misskey.get_timeline(limit=limit, until_id=until_id)
+
+    def add_reaction_to_note(self, note_id: str, reaction: str) -> dict:
+        """Add reaction to a note
+
+        Args:
+            note_id: Target note ID to add reaction
+            reaction: Reaction emoji (e.g., "👍", "❤️", "😀")
+
+        Returns:
+            API response
+
+        Raises:
+            ValueError: If configuration is not loaded or required parameters are not provided
+        """
+        misskey = self.get_misskey_client()
+        return misskey.add_reaction(note_id=note_id, reaction=reaction)
