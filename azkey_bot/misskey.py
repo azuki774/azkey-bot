@@ -54,7 +54,7 @@ def get_user_notes(user_id="acfu9psygqdo02op", limit=10, with_replies=True,
     return response.json()
 
 
-def get_all_notes_paginated(user_id="acfu9psygqdo02op", total_count=500, page_size=100):
+def get_all_notes_paginated(user_id, total_count=500, page_size=100):
     """Get specified number of notes using pagination
 
     Args:
@@ -97,7 +97,7 @@ def get_all_notes_paginated(user_id="acfu9psygqdo02op", total_count=500, page_si
     return all_notes
 
 
-def get_latest_notes_since(user_id="acfu9psygqdo02op", since_id=None, limit=100):
+def get_latest_notes_since(user_id, since_id=None, limit=100):
     """Get latest notes since a specific ID
 
     Args:

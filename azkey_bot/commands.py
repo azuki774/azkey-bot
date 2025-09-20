@@ -9,7 +9,7 @@ def status_command():
 
 
 @click.command("get")
-@click.option("--user-id", default="acdc20dugqdo00jp", help="User ID for the request")
+@click.option("--user-id", default="abjfigpearw5000a", help="User ID for the request")
 @click.option("--limit", default=100, help="Number of notes to fetch")
 @click.option("--with-replies", is_flag=True, default=True, help="Include replies")
 @click.option("--analyze", is_flag=True, help="Analyze the response data")
