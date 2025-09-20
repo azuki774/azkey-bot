@@ -81,6 +81,16 @@ uv run ruff format
 uv run ruff check --fix && uv run ruff format
 ```
 
+## CI/CD
+
+GitHub Actions automatically runs code quality checks on every push and pull request:
+
+- **Ruff Linter**: Checks code style, imports, type annotations, and best practices
+- **Ruff Formatter**: Ensures consistent code formatting
+- **Python 3.13**: Tests against the target Python version
+
+The workflow fails if any linting errors or formatting issues are detected. Run `uv run ruff check --fix && uv run ruff format` locally before pushing to ensure CI passes.
+
 ## Data Schema
 
 CSV file structure in `roumu.csv`:
