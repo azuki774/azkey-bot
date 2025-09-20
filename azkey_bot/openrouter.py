@@ -45,7 +45,6 @@ def analyze_with_ai(analysis_result: str) -> str:
 - 取得リアクション数についての評価: 多ければ多いほど評価されます。
 
 このデータを分析して、以下のフォーマットで出力してください。
-【解説】の欄は、投稿データを解釈して、独自のコメントに置き換えてください。
 
 -------------------------------
 # あずきインターネット評価
@@ -83,12 +82,16 @@ def analyze_with_ai(analysis_result: str) -> str:
 
     try:
         completion = client.chat.completions.create(
-            model="x-ai/grok-4-fast:free",
+            extra_headers={
+                "HTTP-Referer": "https://github.com/azuki774/azkey-bot",
+                "X-Title": "azkey-bot",
+            },
+            model="google/gemini-2.5-flash-lite",
             messages=[
                 {"role": "system", "content": "日本語で分析結果を回答してください。あなたは「あずきインターネット」の人事部担当者です。与えられたフォーマット通りに従業員評価書を作成してください。どのような内容のノートすると、点数が増減されるかは分かるような出力はしないでください。"},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=12000,
+            max_tokens=48000,
             temperature=0.3
         )
         return completion.choices[0].message.content
