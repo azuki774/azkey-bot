@@ -1,6 +1,6 @@
 import click
 
-from .commands import status_command, get_command
+from .commands import status_command, analyze_command
 
 
 @click.group()
@@ -11,7 +11,7 @@ def cli():
 
 
 cli.add_command(status_command)
-cli.add_command(get_command)
+cli.add_command(analyze_command)
 
 
 if __name__ == "__main__":

@@ -8,15 +8,14 @@ def status_command():
     click.echo("azkey-bot is running!")
 
 
-@click.command("get")
+@click.command("analyze")
 @click.option("--user-id", default="abjfigpearw5000a", help="User ID for the request")
 @click.option("--limit", default=100, help="Number of notes to fetch")
 @click.option("--with-replies", is_flag=True, default=True, help="Include replies")
-@click.option("--analyze", is_flag=True, help="Analyze the response data")
 @click.option("--total-count", default=500, help="Total number of notes to fetch when paginating")
 @click.option("--post", is_flag=True, help="Post analysis result to Misskey")
-def get_command(user_id, limit, with_replies, analyze, total_count, post):
-    """Get user notes from azkey.azuki.blue API"""
+def analyze_command(user_id, limit, with_replies, total_count, post):
+    """Analyze user notes from azkey.azuki.blue API"""
     try:
         data = get_all_notes_paginated(user_id, total_count, limit)
         # Analyze the data

@@ -3,7 +3,8 @@ from .openrouter import analyze_with_ai
 
 class NoteAnalyzer:
     def analyze(data):
-        ai_analysis_result = analyze_with_ai(data)
+        extracted_data = NoteAnalyzer.extract(data)
+        ai_analysis_result = analyze_with_ai(extracted_data)
         return ai_analysis_result
 
     def extract(data):
