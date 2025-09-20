@@ -1,24 +1,26 @@
 # azkey-bot-roumu
 
-A roumu bot for azkey.azuki.blue
+azkey.azuki.blue 用のルームボット
 
-## Installation
+azkey-bot-roumu は一般的に言う、SNSのログインボーナスbot です。
+
+## インストール
 
 ```bash
 cd azkey-bot-roumu
 pip install -e .
 ```
 
-## Usage
+## 使用方法
 
 ```bash
 azkey-bot-roumu status
 ```
 
-## Development
+## 開発
 
 ```bash
-# Run with uv
+# uv で実行
 cd azkey-bot-roumu
 uv run python -m azkey_bot_roumu.cli status
 ```
