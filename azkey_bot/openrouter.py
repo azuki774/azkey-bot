@@ -6,13 +6,13 @@ from openai import OpenAI
 
 def analyze_with_ai(analysis_result: str) -> str:
     """Analyze data using OpenRouter AI
-    
+
     Args:
         analysis_result: Text data to analyze
-        
+
     Returns:
         AI analysis result
-        
+
     Raises:
         ValueError: If OpenRouter API key is not set
         Exception: If API request fails
@@ -20,12 +20,12 @@ def analyze_with_ai(analysis_result: str) -> str:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise ValueError("Environment variable 'OPENROUTER_API_KEY' is not set")
-    
+
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
     )
-    
+
     prompt = f"""
 以下は日本のソーシャルメディア（Misskey）の投稿データです。
 このデータを分析して、以下の観点から洞察を提供してください：
@@ -40,7 +40,7 @@ def analyze_with_ai(analysis_result: str) -> str:
 {analysis_result}
 
 日本語で分析結果を回答してください。"""
-    
+
     try:
         completion = client.chat.completions.create(
             model="x-ai/grok-4-fast:free",

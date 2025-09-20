@@ -1,5 +1,4 @@
 import click
-import json
 from .analyzer import NoteAnalyzer
 from .misskey import get_all_notes_paginated
 
