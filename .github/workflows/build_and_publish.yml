@@ -2,6 +2,8 @@ name: Build and Publish
 
 on:
   push:
+    branch:
+      - "**"
     tags:
       - v*
 
