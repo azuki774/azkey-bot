@@ -8,12 +8,23 @@ from .roumu_data import RoumuData
 class Usecases:
     """Main usecases class for handling configuration and API endpoints"""
 
-    def __init__(self):
-        """Initialize Usecases class"""
+    def __init__(self, csv_dir: str = None):
+        """Initialize Usecases class
+
+        Args:
+            csv_dir: Directory path for CSV file storage (default: current directory)
+        """
         self.i = None
         self.openrouter_api_key = None
         self.misskey_endpoint = "https://azkey.azuki.blue"
-        self.roumu_data = RoumuData()
+
+        # Configure CSV file path
+        if csv_dir:
+            csv_file_path = os.path.join(csv_dir, "roumu.csv")
+        else:
+            csv_file_path = "roumu.csv"
+
+        self.roumu_data = RoumuData(csv_file_path)
 
     def load_environment_variables(self):
         """Load environment variables i and OPENROUTER_API_KEY

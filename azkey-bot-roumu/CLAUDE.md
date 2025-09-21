@@ -98,3 +98,27 @@ CSV file structure in `roumu.csv`:
 - `username`: Display name (format: `username@host` or `username`)
 - `consecutive_count`: Number of consecutive check-ins
 - `last_checkin`: ISO timestamp of last check-in (empty = can check-in)
+
+## Docker Deployment
+
+The application supports Docker deployment for server environments:
+
+```bash
+# Build and run with Docker
+docker build -t azkey-bot-roumu .
+docker run --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu check
+
+# Or use Docker Compose for multiple services
+docker-compose up -d
+
+# Automated scheduling with cron
+docker build -f Dockerfile.scheduler -t azkey-bot-roumu:scheduler .
+docker run -d --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu:scheduler
+```
+
+See `DOCKER.md` for detailed deployment instructions.
+
+**Production scheduling:**
+- **follow**: Every 1 hour via cron (`0 * * * *`)
+- **check**: Every 5 minutes via cron (`*/5 * * * *`)
+- Structured logs output to stdout for log aggregation systems

@@ -1,3 +1,5 @@
+import os
+
 import click
 
 from .logger import setup_logger
@@ -18,7 +20,8 @@ def follow_command(limit):
     logger = setup_logger(__name__)
 
     try:
-        usecases = Usecases()
+        csv_dir = os.getenv("ROUMU_DATA_DIR")
+        usecases = Usecases(csv_dir=csv_dir)
         usecases.load_environment_variables()
 
         # Log start
@@ -66,7 +69,8 @@ def dakoku_command(user_id):
     logger = setup_logger(__name__)
 
     try:
-        usecases = Usecases()
+        csv_dir = os.getenv("ROUMU_DATA_DIR")
+        usecases = Usecases(csv_dir=csv_dir)
         usecases.load_environment_variables()
 
         logger.info(f"action=dakoku_start user_id={user_id}")
@@ -111,7 +115,8 @@ def timeline_command(limit, until_id, verbose):
     logger = setup_logger(__name__)
 
     try:
-        usecases = Usecases()
+        csv_dir = os.getenv("ROUMU_DATA_DIR")
+        usecases = Usecases(csv_dir=csv_dir)
         usecases.load_environment_variables()
 
         logger.info(f"action=timeline_start limit={limit} until_id={until_id}")
@@ -187,7 +192,8 @@ def check_command():
     TARGET_KEYWORDS = ["ログインボーナス", "ログボ", "打刻"]
 
     try:
-        usecases = Usecases()
+        csv_dir = os.getenv("ROUMU_DATA_DIR")
+        usecases = Usecases(csv_dir=csv_dir)
         usecases.load_environment_variables()
 
         logger.info(f'action=check_start keywords="{",".join(TARGET_KEYWORDS)}"')
