@@ -232,27 +232,16 @@ class Usecases:
         """
         return self.roumu_data.get_user(user_id)
 
-    def reset_roumu_count(self, user_id: str) -> bool:
-        """Reset user's consecutive roumu count
+    def reset_count(self) -> dict:
+        """Reset all users' count based on current state
 
-        Args:
-            user_id: Target user ID
-
-        Returns:
-            True if reset successful, False if user not found
-        """
-        return self.roumu_data.reset_consecutive_count(user_id)
-
-    def reset_roumu_checkin(self, user_id: str = None) -> dict:
-        """Reset user's last check-in (allows new check-in)
-
-        Args:
-            user_id: Target user ID, if None resets all users
+        - If last_checkin is empty: set consecutive_count = 0
+        - If last_checkin is not empty: set last_checkin = ""
 
         Returns:
             Dictionary with reset results
         """
-        return self.roumu_data.reset_last_checkin(user_id)
+        return self.roumu_data.reset_count()
 
     def get_username_from_userid(self, user_id: str) -> str:
         """Get username from user ID using Misskey API

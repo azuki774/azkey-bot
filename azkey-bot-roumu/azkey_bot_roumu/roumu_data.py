@@ -145,8 +145,42 @@ class RoumuData:
             "already_checked_in": False,
         }
 
+    def reset_count(self) -> dict:
+        """Reset all users' count based on current state
+
+        - If last_checkin is empty: set consecutive_count = 0
+        - If last_checkin is not empty: set last_checkin = ""
+
+        Returns:
+            Dictionary with reset results
+        """
+        users = self.load_all_users()
+        consecutive_count_reset = 0
+        last_checkin_reset = 0
+
+        for user in users:
+            if not user.get("last_checkin") or user["last_checkin"].strip() == "":
+                # last_checkin is empty: reset consecutive_count
+                user["consecutive_count"] = "0"
+                consecutive_count_reset += 1
+            else:
+                # last_checkin is not empty: clear last_checkin
+                user["last_checkin"] = ""
+                last_checkin_reset += 1
+
+        if consecutive_count_reset > 0 or last_checkin_reset > 0:
+            self._save_all_users(users)
+
+        return {
+            "total_users": len(users),
+            "consecutive_count_reset": consecutive_count_reset,
+            "last_checkin_reset": last_checkin_reset,
+            "message": f"Reset {consecutive_count_reset} consecutive_counts and {last_checkin_reset} last_checkins",
+            "success": True,
+        }
+
     def reset_consecutive_count(self, user_id: str) -> bool:
-        """Reset user's consecutive count to 0
+        """Reset user's consecutive count to 0 (deprecated - use reset_count instead)
 
         Args:
             user_id: Target user ID
@@ -166,7 +200,7 @@ class RoumuData:
         return False
 
     def reset_last_checkin(self, user_id: str = None) -> dict:
-        """Reset last_checkin to empty (allows new check-in)
+        """Reset last_checkin to empty (deprecated - use reset_count instead)
 
         Args:
             user_id: Target user ID, if None resets all users

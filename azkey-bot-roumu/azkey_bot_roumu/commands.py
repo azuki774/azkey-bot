@@ -329,3 +329,30 @@ def check_command():
     except Exception as e:
         logger.error(f'action=check_error error="{e}"')
         raise
+
+
+@click.command("reset")
+def reset_command():
+    """Reset all users' count based on current state with structured logging"""
+    logger = setup_logger(__name__)
+
+    try:
+        csv_dir = os.getenv("ROUMU_DATA_DIR")
+        usecases = Usecases(csv_dir=csv_dir)
+
+        # Log start
+        logger.info('action=reset_start message="Starting reset process for all users"')
+
+        result = usecases.reset_count()
+
+        # Log results
+        logger.info(
+            f"action=reset_complete total_users={result['total_users']} "
+            f"consecutive_count_reset={result['consecutive_count_reset']} "
+            f"last_checkin_reset={result['last_checkin_reset']} "
+            f'message="{result["message"]}"'
+        )
+
+    except Exception as e:
+        logger.error(f'action=reset_error error="{e}"')
+        raise

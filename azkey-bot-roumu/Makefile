@@ -39,6 +39,10 @@ dakoku:
 	@if [ -z "$(USER_ID)" ]; then echo "Usage: make dakoku USER_ID=<user_id>"; exit 1; fi
 	docker run --rm --env-file $(ENV_FILE) -e ROUMU_DATA_DIR=$(ROUMU_DATA_DIR) -v $(DATA_DIR):/app/data $(IMAGE_NAME) dakoku --user-id $(USER_ID)
 
+.PHONY: reset
+reset:
+	docker run --rm --env-file $(ENV_FILE) -e ROUMU_DATA_DIR=$(ROUMU_DATA_DIR) -v $(DATA_DIR):/app/data $(IMAGE_NAME) reset
+
 # Docker Compose operations
 .PHONY: compose-up
 compose-up:
