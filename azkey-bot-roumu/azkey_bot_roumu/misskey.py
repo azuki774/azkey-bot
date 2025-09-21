@@ -147,7 +147,7 @@ class Misskey:
             API response containing timeline posts
         """
         payload = {"limit": limit}
-        
+
         if until_id:
             payload["untilId"] = until_id
 
@@ -171,9 +171,6 @@ class Misskey:
         if not reaction:
             raise ValueError("reaction is required")
 
-        payload = {
-            "noteId": note_id,
-            "reaction": reaction
-        }
+        payload = {"noteId": note_id, "reaction": reaction}
 
         return self.post("/api/notes/reactions/create", payload)

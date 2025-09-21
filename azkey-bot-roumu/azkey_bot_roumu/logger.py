@@ -14,22 +14,22 @@ class StructuredFormatter(logging.Formatter):
             "timestamp": self.formatTime(record),
             "level": record.levelname,
             "component": record.name,
-            "message": record.getMessage()
+            "message": record.getMessage(),
         }
 
         # Add extra fields if available
-        if hasattr(record, 'extra_data') and record.extra_data:
+        if hasattr(record, "extra_data") and record.extra_data:
             log_entry.update(record.extra_data)
 
         # Format as key=value pairs for easy parsing
         formatted_parts = []
         for key, value in log_entry.items():
-            if isinstance(value, str) and ' ' in value:
+            if isinstance(value, str) and " " in value:
                 formatted_parts.append(f'{key}="{value}"')
             else:
-                formatted_parts.append(f'{key}={value}')
+                formatted_parts.append(f"{key}={value}")
 
-        return ' '.join(formatted_parts)
+        return " ".join(formatted_parts)
 
 
 def setup_logger(name: str) -> logging.Logger:
@@ -52,7 +52,9 @@ def setup_logger(name: str) -> logging.Logger:
     return logger
 
 
-def log_with_data(logger: logging.Logger, level: str, message: str, **kwargs: Any) -> None:
+def log_with_data(
+    logger: logging.Logger, level: str, message: str, **kwargs: Any
+) -> None:
     """Log message with structured data
 
     Args:
@@ -61,17 +63,9 @@ def log_with_data(logger: logging.Logger, level: str, message: str, **kwargs: An
         message: Log message
         **kwargs: Additional structured data
     """
-    log_method = getattr(logger, level.lower())
-
     # Create a LogRecord with extra data
     record = logger.makeRecord(
-        logger.name,
-        getattr(logging, level.upper()),
-        __file__,
-        0,
-        message,
-        (),
-        None
+        logger.name, getattr(logging, level.upper()), __file__, 0, message, (), None
     )
     record.extra_data = kwargs
 

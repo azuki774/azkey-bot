@@ -1,6 +1,12 @@
 import click
 
-from .commands import check_command, dakoku_command, follow_command, status_command, timeline_command
+from .commands import (
+    check_command,
+    dakoku_command,
+    follow_command,
+    status_command,
+    timeline_command,
+)
 
 
 @click.group()
