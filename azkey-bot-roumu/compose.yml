@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  azkey-bot-roumu:
+    build: .
+    environment:
+      # Misskey access token (required)
+      - i=${MISSKEY_TOKEN}
+      # OpenRouter API key (required)
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # CSV data directory
+      - ROUMU_DATA_DIR=/app/data
+    volumes:
+      # Persistent storage for CSV data
+      - ./data:/app/data
+    restart: unless-stopped
+    # Override default command
+    command: status
+volumes:
+  data:
+    driver: local
