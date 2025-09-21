@@ -1,94 +1,93 @@
 import click
 
+from .logger import setup_logger
 from .usecases import Usecases
 
 
 @click.command("status")
 def status_command():
     """Show current status"""
-    click.echo("azkey-bot-roumu is running!")
+    logger = setup_logger(__name__)
+    logger.info("action=status_check message=\"azkey-bot-roumu is running\"")
 
 
 @click.command("follow")
-@click.option("--limit", default=10, help="Number of notifications to fetch")
+@click.option("--limit", default=100, help="Number of users to check for follow back")
 def follow_command(limit):
-    """Get latest follow notifications"""
+    """Execute follow back process with structured logging"""
+    logger = setup_logger(__name__)
+    
     try:
-        # Load configuration
         usecases = Usecases()
         usecases.load_environment_variables()
-        click.echo("🔄 フォローバック処理を開始します...")
-        result = usecases.follow_back()
-
-        click.echo("=" * 50)
-        click.echo("📊 フォローバック結果:")
-        click.echo(f"  👥 フォロワー数: {result['total_followers']}人")
-        click.echo(f"  ➡️  フォロー中: {result['total_following']}人")
-        click.echo(f"  🔄 フォローバック対象: {result['users_to_follow_back']}人")
-        click.echo(f"  ✅ 成功: {result['success_count']}人")
-        click.echo(f"  ❌ 失敗: {result['failure_count']}人")
-
-        if result["successful_follows"]:
-            click.echo("\n✅ フォローバック成功:")
-            for user_id in result["successful_follows"]:
-                click.echo(f"  - {user_id}")
-
-        if result["failed_follows"]:
-            click.echo("\n❌ フォローバック失敗:")
-            for failed in result["failed_follows"]:
-                click.echo(f"  - {failed['follow_id']}: {failed['error']}")
-
-        if result["users_to_follow_back"] == 0:
-            click.echo("\n🎉 すべてのフォロワーを既にフォロー済みです！")
-
-    except ValueError as e:
-        click.echo(f"設定エラー: {e}", err=True)
+        
+        # Log start
+        logger.info(f"action=follow_start limit={limit}")
+        
+        result = usecases.follow_back(limit=limit)
+        
+        # Log results
+        logger.info(f"action=follow_complete total_followers={result['total_followers']} "
+                   f"total_following={result['total_following']} "
+                   f"users_to_follow_back={result['users_to_follow_back']} "
+                   f"success_count={result['success_count']} "
+                   f"failure_count={result['failure_count']}")
+        
+        # Log successful follows
+        for user_id in result["successful_follows"]:
+            logger.info(f"action=follow_success user_id={user_id}")
+        
+        # Log failed follows
+        for failed in result["failed_follows"]:
+            logger.warning(f"action=follow_failed user_id={failed['follow_id']} error=\"{failed['error']}\"")
+        
+        # Log final result summary
+        if result["users_to_follow_back"] > 0:
+            logger.info(f"action=follow_summary message=\"Follow back completed\" "
+                       f"success_count={result['success_count']} failure_count={result['failure_count']}")
+        else:
+            logger.info("action=follow_summary message=\"No users to follow back\"")
+            
     except Exception as e:
-        click.echo(f"エラーが発生しました: {e}", err=True)
+        logger.error(f"action=follow_error error=\"{e}\"")
+        raise
 
 
 @click.command("dakoku")
 @click.option("--user-id", required=True, help="User ID to check in")
 def dakoku_command(user_id):
     """Debug command: Manual check-in for specified user"""
+    logger = setup_logger(__name__)
+    
     try:
-        # Load configuration
         usecases = Usecases()
         usecases.load_environment_variables()
 
-        click.echo("🔧 デバッグ打刻を実行中...")
-        click.echo(f"👤 ユーザーID: {user_id}")
+        logger.info(f"action=dakoku_start user_id={user_id}")
 
-        # Get username from API if not provided
-        click.echo("📡 ユーザー名をAPIから取得中...")
+        # Get username from API
         try:
             username = usecases.get_username_from_userid(user_id)
-            click.echo(f"📝 取得したユーザー名: {username}")
+            logger.info(f"action=username_retrieved user_id={user_id} username=\"{username}\"")
         except Exception as e:
-            click.echo(f"⚠️  ユーザー名取得失敗: {e}")
+            logger.warning(f"action=username_failed user_id={user_id} error=\"{e}\"")
             username = "unknown_user"
 
         # Perform check-in
         result = usecases.checkin_roumu(user_id)
 
-        click.echo("=" * 50)
         if result.get("already_checked_in", False):
-            click.echo("⚠️  既に本日打刻済みです")
-            click.echo(f"👤 ユーザー名: {username}")
-            click.echo(f"📅 前回打刻: {result['last_checkin']}")
-            click.echo(f"🔢 連続回数: {result['consecutive_count']}回")
+            logger.info(f"action=already_checked_in user_id={user_id} username=\"{username}\" "
+                       f"consecutive_count={result['consecutive_count']} last_checkin=\"{result['last_checkin']}\" "
+                       f"message=\"Already checked in today\"")
         else:
-            click.echo("✅ 打刻完了!")
-            click.echo(f"👤 ユーザー名: {username}")
-            click.echo(f"📅 打刻時刻: {result['last_checkin']}")
-            click.echo(f"🔢 連続回数: {result['consecutive_count']}回")
-            if result.get("was_new_user", False):
-                click.echo("🆕 新規ユーザーです")
-
-        click.echo("\n📊 CSV ファイル 'roumu.csv' に記録されました")
+            logger.info(f"action=checkin_success user_id={user_id} username=\"{username}\" "
+                       f"consecutive_count={result['consecutive_count']} last_checkin=\"{result['last_checkin']}\" "
+                       f"was_new_user={result.get('was_new_user', False)} message=\"Check-in successful\"")
 
     except Exception as e:
-        click.echo(f"エラーが発生しました: {e}", err=True)
+        logger.error(f"action=dakoku_error user_id={user_id} error=\"{e}\"")
+        raise
 
 
 @click.command("timeline")
@@ -97,127 +96,109 @@ def dakoku_command(user_id):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed post information")
 def timeline_command(limit, until_id, verbose):
     """Debug command: Fetch and display timeline posts"""
+    logger = setup_logger(__name__)
+    
     try:
-        # Load configuration
         usecases = Usecases()
         usecases.load_environment_variables()
 
-        click.echo("🔍 タイムライン取得中...")
-        click.echo(f"📊 取得件数: {limit}件")
-        if until_id:
-            click.echo(f"🔄 ページネーション: {until_id} より前")
+        logger.info(f"action=timeline_start limit={limit} until_id={until_id}")
 
-        # Get timeline
         timeline = usecases.get_timeline(limit=limit, until_id=until_id)
 
         if not timeline:
-            click.echo("📭 タイムラインが空です")
+            logger.info("action=timeline_empty message=\"Timeline is empty\"")
             return
 
-        click.echo("=" * 60)
-        click.echo(f"📝 取得したタイムライン: {len(timeline)}件")
-        click.echo("=" * 60)
+        logger.info(f"action=timeline_retrieved post_count={len(timeline)} message=\"Retrieved timeline posts\"")
 
         for i, post in enumerate(timeline, 1):
             user = post.get("user", {})
             username = user.get("username", "unknown")
             name = user.get("name") or username
-
-            # Post basic info
+            
             post_id = post.get("id", "")
             created_at = post.get("createdAt", "")
             text = post.get("text", "")
-
-            click.echo(f"\n📌 投稿 {i}")
-            click.echo(f"👤 {name} (@{username})")
-            click.echo(f"🆔 ID: {post_id}")
-            click.echo(f"📅 投稿日時: {created_at}")
-
+            
+            # Log post details
+            post_data = f"action=timeline_post post_number={i} user_id={user.get('id', '')} username=\"{username}\" post_id={post_id} created_at=\"{created_at}\""
+            
             if text:
-                # Truncate long text
                 display_text = text[:100] + "..." if len(text) > 100 else text
-                click.echo(f"📝 内容: {display_text}")
+                post_data += f" text=\"{display_text}\""
             else:
-                click.echo("📝 内容: (テキストなし)")
+                post_data += " text=\"(no text)\""
 
             if verbose:
-                # Show additional details
                 reactions = post.get("reactions", {})
                 if reactions:
                     reaction_summary = ", ".join([f"{k}: {v}" for k, v in reactions.items()])
-                    click.echo(f"💝 リアクション: {reaction_summary}")
-
+                    post_data += f" reactions=\"{reaction_summary}\""
+                
                 files = post.get("files", [])
                 if files:
-                    click.echo(f"📎 添付ファイル: {len(files)}個")
-
+                    post_data += f" files_count={len(files)}"
+                
                 reply_id = post.get("replyId")
                 if reply_id:
-                    click.echo(f"💬 返信先: {reply_id}")
-
+                    post_data += f" reply_to={reply_id}"
+                
                 renote_id = post.get("renoteId")
                 if renote_id:
-                    click.echo(f"🔄 リノート元: {renote_id}")
+                    post_data += f" renote_of={renote_id}"
+            
+            logger.info(post_data)
 
-            click.echo("-" * 40)
-
-        # Show last post ID for pagination
+        # Log pagination info
         if timeline:
             last_post_id = timeline[-1].get("id")
-            click.echo(f"\n🔄 次のページ取得用ID: {last_post_id}")
-            click.echo(f"💡 コマンド例: azkey-bot-roumu timeline --limit {limit} --until-id {last_post_id}")
+            logger.info(f"action=timeline_pagination last_post_id={last_post_id} "
+                       f"next_command=\"azkey-bot-roumu timeline --limit {limit} --until-id {last_post_id}\"")
 
-    except ValueError as e:
-        click.echo(f"設定エラー: {e}", err=True)
     except Exception as e:
-        click.echo(f"エラーが発生しました: {e}", err=True)
+        logger.error(f"action=timeline_error error=\"{e}\"")
+        raise
 
 
 @click.command("check")
 def check_command():
-    """Check timeline for keywords and perform dakoku for matching users"""
+    """Check timeline for keywords and perform dakoku with structured logging"""
+    logger = setup_logger(__name__)
+    
     # 検索対象キーワード（定数として定義）
-    TARGET_KEYWORDS = [
-        "ログインボーナス",
-        "ログボ",
-        "打刻"
-    ]
-
+    TARGET_KEYWORDS = ["ログインボーナス", "ログボ", "打刻"]
+    
     try:
-        # Load configuration
         usecases = Usecases()
         usecases.load_environment_variables()
 
-        click.echo("🔍 タイムライン取得中...")
-        click.echo(f"🔍 検索キーワード: {', '.join(TARGET_KEYWORDS)}")
+        logger.info(f"action=check_start keywords=\"{','.join(TARGET_KEYWORDS)}\"")
 
         # Get timeline (最近100件)
         timeline = usecases.get_timeline(limit=100)
 
         if not timeline:
-            click.echo("📭 タイムラインが空です")
+            logger.info("action=timeline_empty message=\"Timeline is empty\"")
             return
 
-        click.echo(f"📝 取得したタイムライン: {len(timeline)}件")
+        logger.info(f"action=timeline_retrieved post_count={len(timeline)} message=\"Retrieved timeline posts\"")
 
         # キーワードが含まれているノートを抽出
         matching_posts = []
         for post in timeline:
             text = post.get("text", "")
             if text:
-                # いずれかのキーワードが含まれているかチェック
                 for keyword in TARGET_KEYWORDS:
                     if keyword in text:
                         matching_posts.append(post)
-                        break  # 一つでもマッチしたら追加して次の投稿へ
+                        break
 
-        click.echo(f"🎯 キーワードが含まれる投稿: {len(matching_posts)}件")
+        logger.info(f"action=keyword_match_complete matching_posts={len(matching_posts)} message=\"Keyword matching completed\"")
 
         if not matching_posts:
-            click.echo("🔍 該当する投稿が見つかりませんでした")
+            logger.info("action=no_matches message=\"No matching posts found\"")
             return
-
-        click.echo("=" * 50)
 
         # 打刻処理
         successful_checkins = []
@@ -228,7 +209,6 @@ def check_command():
             user = post.get("user", {})
             user_id = user.get("id", "")
             username = user.get("username", "unknown")
-            name = user.get("name") or username
             text = post.get("text", "")
             post_id = post.get("id", "")
 
@@ -239,16 +219,11 @@ def check_command():
                     matched_keyword = keyword
                     break
 
-            click.echo(f"\n📌 該当投稿 {i}")
-            click.echo(f"👤 {name} (@{username})")
-            click.echo(f"🆔 ユーザーID: {user_id}")
-            click.echo(f"📝 ノートID: {post_id}")
-            click.echo(f"🎯 マッチしたキーワード: {matched_keyword}")
-            display_text = text[:50] + "..." if len(text) > 50 else text
-            click.echo(f"📝 内容: {display_text}")
+            logger.info(f"action=process_post post_number={i} user_id={user_id} "
+                       f"username=\"{username}\" post_id={post_id} matched_keyword=\"{matched_keyword}\"")
 
             if not user_id:
-                click.echo("⚠️  ユーザーIDが取得できませんでした")
+                logger.warning(f"action=user_id_missing post_id={post_id}")
                 failed_checkins.append({"user_id": user_id, "username": username, "note_id": post_id, "error": "ユーザーID不明"})
                 continue
 
@@ -257,56 +232,35 @@ def check_command():
                 result = usecases.checkin_roumu(user_id)
 
                 if result.get("already_checked_in", False):
-                    click.echo("⚠️  既に本日打刻済みです")
+                    logger.info(f"action=already_checked_in user_id={user_id} username=\"{username}\" "
+                               f"post_id={post_id} consecutive_count={result['consecutive_count']}")
                     already_checked_in.append({"user_id": user_id, "username": username, "note_id": post_id})
                 else:
-                    click.echo("✅ 打刻完了!")
-                    click.echo(f"📝 根拠ノートID: {post_id}")
-                    click.echo(f"🔢 連続回数: {result['consecutive_count']}回")
-                    if result.get("was_new_user", False):
-                        click.echo("🆕 新規ユーザーです")
+                    logger.info(f"action=checkin_success user_id={user_id} username=\"{username}\" "
+                               f"post_id={post_id} consecutive_count={result['consecutive_count']} "
+                               f"was_new_user={result.get('was_new_user', False)}")
                     
                     # 根拠ノートにリアクションを追加
                     try:
                         usecases.add_reaction_to_note(post_id, "👍")
-                        click.echo("👍 リアクションを追加しました")
+                        logger.info(f"action=reaction_added post_id={post_id} reaction=👍")
                     except Exception as reaction_error:
-                        click.echo(f"⚠️  リアクション追加に失敗: {reaction_error}")
+                        logger.warning(f"action=reaction_failed post_id={post_id} error=\"{reaction_error}\"")
                     
                     successful_checkins.append({"user_id": user_id, "username": username, "note_id": post_id, "consecutive_count": result['consecutive_count']})
 
             except Exception as e:
-                click.echo(f"❌ 打刻失敗: {e}")
+                logger.error(f"action=checkin_failed user_id={user_id} username=\"{username}\" "
+                            f"post_id={post_id} error=\"{e}\"")
                 failed_checkins.append({"user_id": user_id, "username": username, "note_id": post_id, "error": str(e)})
 
-            click.echo("-" * 30)
-
         # 結果サマリー
-        click.echo("=" * 50)
-        click.echo("📊 打刻処理結果:")
-        click.echo(f"  🎯 該当投稿: {len(matching_posts)}件")
-        click.echo(f"  ✅ 新規打刻: {len(successful_checkins)}人")
-        click.echo(f"  ⚠️  既に打刻済み: {len(already_checked_in)}人")
-        click.echo(f"  ❌ 失敗: {len(failed_checkins)}人")
+        logger.info(f"action=check_complete matching_posts={len(matching_posts)} "
+                   f"success_count={len(successful_checkins)} "
+                   f"already_count={len(already_checked_in)} "
+                   f"failure_count={len(failed_checkins)} "
+                   f"message=\"Timeline check completed\"")
 
-        if successful_checkins:
-            click.echo("\n✅ 新規打刻成功:")
-            for checkin in successful_checkins:
-                click.echo(f"  - {checkin['username']} (連続{checkin['consecutive_count']}回)")
-
-        if already_checked_in:
-            click.echo("\n⚠️  既に打刻済み:")
-            for checkin in already_checked_in:
-                click.echo(f"  - {checkin['username']}")
-
-        if failed_checkins:
-            click.echo("\n❌ 打刻失敗:")
-            for failed in failed_checkins:
-                click.echo(f"  - {failed['username']}: {failed['error']}")
-
-        click.echo("\n📊 CSV ファイル 'roumu.csv' に記録されました")
-
-    except ValueError as e:
-        click.echo(f"設定エラー: {e}", err=True)
     except Exception as e:
-        click.echo(f"エラーが発生しました: {e}", err=True)
+        logger.error(f"action=check_error error=\"{e}\"")
+        raise
