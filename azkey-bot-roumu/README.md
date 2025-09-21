@@ -62,6 +62,9 @@ azkey-bot-roumu dakoku --user-id USER_ID
 
 # タイムライン表示（デバッグ用）
 azkey-bot-roumu timeline --limit 10
+
+# 全ユーザーのカウントリセット
+azkey-bot-roumu reset
 ```
 
 ### 自動実行
@@ -84,12 +87,20 @@ Docker を使用した実行方法については `DOCKER.md` を参照してく
 ### 基本的な Docker 実行
 
 ```bash
-# イメージをビルド
-docker build -t azkey-bot-roumu .
+# イメージをビルド（キャッシュなし）
+make build
 
-# 単発実行
-docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu check
+# 各コマンドの実行
+make status     # ステータス確認
+make follow     # フォローバック実行
+make check      # タイムラインチェック・自動打刻
+make reset      # 全ユーザーのカウントリセット
 
+# データディレクトリの初期設定
+make setup-data
+
+# 一括セットアップ
+make quick-start
 ```
 
 ## 監視キーワード
@@ -113,6 +124,24 @@ docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu check
 | total_count | 累計打刻回数 |
 | last_checkin | 最後の打刻日時（ISO形式） |
 
+### カウントリセット機能
+
+`reset` コマンドは全ユーザーのカウントを以下のロジックでリセットします：
+
+- **`last_checkin` が空の場合**: `consecutive_count` を 0 にリセット
+- **`last_checkin` が空でない場合**: `last_checkin` を空文字列にクリア（再打刻可能状態）
+
+```bash
+# 全ユーザーのカウントリセット実行
+azkey-bot-roumu reset
+# または
+make reset
+```
+
+**使用例:**
+- 月次リセット: 毎月1日に実行して連続記録をリセット
+- 再打刻許可: 特定の日に全ユーザーの再打刻を許可
+
 ### ⚠️ 重要な注意事項
 
 **CSV ファイルの同時アクセスについて:**
@@ -135,8 +164,9 @@ docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu check
 
 ```
 action=check_start keywords="ログインボーナス,ログボ,打刻"
-action=checkin_success user_id=abc123 username="user1" post_id=xyz789 consecutive_count=5
+action=checkin_success user_id=abc123 username="user1" post_id=xyz789 consecutive_count=5 total_count=25
 action=reaction_added post_id=xyz789 reaction=👍
+action=reset_complete total_users=10 consecutive_count_reset=3 last_checkin_reset=7
 ```
 
 ### ログレベル

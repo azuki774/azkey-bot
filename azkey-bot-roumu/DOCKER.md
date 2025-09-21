@@ -12,7 +12,12 @@ cp .env.example .env
 
 2. データディレクトリを作成:
 ```bash
+# 手動作成
 mkdir -p data
+chmod 777 data
+
+# または Makefile を使用
+make setup-data
 ```
 
 ## 基本的な使用方法
@@ -20,40 +25,50 @@ mkdir -p data
 ### 単発実行
 
 ```bash
-# イメージをビルド
-docker build -t azkey-bot-roumu .
+# Makefile を使用（推奨）
+make build        # イメージをビルド（キャッシュなし）
+make status       # ステータス確認
+make follow       # フォローバック実行
+make check        # タイムラインチェック実行
+make reset        # 全ユーザーのカウントリセット
 
-# ステータス確認
-docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu status
+# 一括セットアップ
+make quick-start  # 環境チェック + データディレクトリ作成 + ビルド
 
-# フォローバック実行
-docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu follow
+# または直接 Docker コマンド
+docker build --no-cache -t azkey-bot-roumu .
+docker run --rm --env-file .env -e ROUMU_DATA_DIR=/app/data -v $(pwd)/data:/app/data azkey-bot-roumu status
+docker run --rm --env-file .env -e ROUMU_DATA_DIR=/app/data -v $(pwd)/data:/app/data azkey-bot-roumu follow
+docker run --rm --env-file .env -e ROUMU_DATA_DIR=/app/data -v $(pwd)/data:/app/data azkey-bot-roumu check
+docker run --rm --env-file .env -e ROUMU_DATA_DIR=/app/data -v $(pwd)/data:/app/data azkey-bot-roumu reset
 
-# タイムラインチェック実行
-docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu check
-
-# デバッグ: 特定ユーザーの打刻
-docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu dakoku --user-id USER_ID
-
-# タイムライン表示
-docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu timeline --limit 5
+# デバッグコマンド
+make dakoku USER_ID=abc123    # 特定ユーザーの打刻
+make timeline LIMIT=5        # タイムライン表示
 ```
 
 ### Docker Compose での実行
 
 ```bash
-# サービス起動
-docker-compose up -d
+# Makefile を使用（推奨）
+make compose-up           # サービス起動（自動ビルド）
+make compose-up-nocache   # キャッシュなしでビルド＆起動
+make compose-down         # サービス停止
+
+# または直接 Docker Compose コマンド
+docker compose up -d --build        # サービス起動（自動ビルド）
+docker compose build --no-cache     # キャッシュなしでビルド
+docker compose up -d                # 起動
 
 # ログ確認
-docker-compose logs -f azkey-bot-roumu
+docker compose logs -f azkey-bot-roumu
 
 # 特定サービスのログ確認
-docker-compose logs -f follow-service
-docker-compose logs -f check-service
+docker compose logs -f follow-service
+docker compose logs -f check-service
 
 # サービス停止
-docker-compose down
+docker compose down
 ```
 
 ## 自動実行（スケジューラー版）
@@ -88,6 +103,9 @@ docker logs azkey-bot-scheduler 2>&1 | grep "action=follow"
 
 # 打刻成功のログのみ
 docker logs azkey-bot-scheduler 2>&1 | grep "action=checkin_success"
+
+# リセット処理のログのみ
+docker logs azkey-bot-scheduler 2>&1 | grep "action=reset"
 
 # エラーログのみ
 docker logs azkey-bot-scheduler 2>&1 | grep "level=ERROR"

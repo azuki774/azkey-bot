@@ -28,7 +28,10 @@ azkey-bot-roumu <command>
 
 - `azkey-bot-roumu status` - Show current status
 - `azkey-bot-roumu follow` - Execute follow-back automation for Misskey followers
+- `azkey-bot-roumu check` - Monitor timeline for keywords and perform automatic check-ins
+- `azkey-bot-roumu reset` - Reset all users' count based on current state
 - `azkey-bot-roumu dakoku --user-id <id>` - Debug command for manual user check-in
+- `azkey-bot-roumu timeline --limit <n>` - Display recent timeline posts
 
 ## Architecture
 
@@ -38,7 +41,7 @@ azkey-bot-roumu <command>
 
 **Misskey API Client** (`misskey.py`): Handles all Misskey server communication including follow/unfollow operations, user information retrieval, and notification management.
 
-**RoumuData** (`roumu_data.py`): CSV-based persistence layer for check-in tracking with schema: `user_id`, `username`, `consecutive_count`, `last_checkin`. Implements duplicate check-in prevention and leaderboard functionality.
+**RoumuData** (`roumu_data.py`): CSV-based persistence layer for check-in tracking with schema: `user_id`, `consecutive_count`, `total_count`, `last_checkin`. Implements duplicate check-in prevention, leaderboard functionality, and count reset operations.
 
 ### Data Flow Architecture
 
@@ -50,15 +53,22 @@ azkey-bot-roumu <command>
 ### Key Features
 
 - **Follow-back Automation**: Automatically follows users who follow you but aren't followed back
-- **Check-in System**: Daily login bonus tracking with consecutive count and duplicate prevention
+- **Check-in System**: Daily login bonus tracking with consecutive count, total count and duplicate prevention
+- **Timeline Monitoring**: Automatic keyword detection and check-in processing
+- **Count Reset System**: Conditional reset logic based on last check-in status
+- **Automatic Reactions**: Adds 👍 reactions to posts that trigger successful check-ins
 - **Username Resolution**: Automatic username lookup from user IDs via Misskey API
 - **CSV Persistence**: Lightweight data storage for user check-in records
+- **Structured Logging**: Server-friendly logging for production deployment
 
 ## Environment Variables
 
 Required for API operations:
 - `i`: Misskey access token
 - `OPENROUTER_API_KEY`: OpenRouter API key (for future AI features)
+
+Optional:
+- `ROUMU_DATA_DIR`: Directory path for CSV file storage (default: current directory)
 
 ## Code Quality
 
@@ -104,12 +114,20 @@ CSV file structure in `roumu.csv`:
 The application supports Docker deployment for server environments:
 
 ```bash
-# Build and run with Docker
-docker build -t azkey-bot-roumu .
-docker run --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu check
+# Quick start with Makefile
+make quick-start          # Setup data directory, build image
+make status               # Check status
+make follow               # Execute follow-back
+make check                # Execute timeline monitoring
+make reset                # Reset all users' counts
 
-# Or use Docker Compose for multiple services
-docker-compose up -d
+# Or manual Docker commands
+docker build --no-cache -t azkey-bot-roumu .
+docker run --env-file .env -e ROUMU_DATA_DIR=/app/data -v $(pwd)/data:/app/data azkey-bot-roumu check
+
+# Docker Compose for services
+make compose-up-nocache   # Build and start services
+make compose-down         # Stop services
 
 # Automated scheduling with cron
 docker build -f Dockerfile.scheduler -t azkey-bot-roumu:scheduler .
@@ -121,4 +139,5 @@ See `DOCKER.md` for detailed deployment instructions.
 **Production scheduling:**
 - **follow**: Every 1 hour via cron (`0 * * * *`)
 - **check**: Every 5 minutes via cron (`*/5 * * * *`)
+- **reset**: Manual execution (e.g., monthly reset)
 - Structured logs output to stdout for log aggregation systems
