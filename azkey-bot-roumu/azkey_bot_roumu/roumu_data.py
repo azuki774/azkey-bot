@@ -15,7 +15,7 @@ class RoumuData:
             csv_file_path: Path to the CSV file (default: "roumu.csv")
         """
         self.csv_file_path = csv_file_path
-        self.fieldnames = ["user_id", "consecutive_count", "last_checkin"]
+        self.fieldnames = ["user_id", "consecutive_count", "total_count", "last_checkin"]
 
         # Create CSV file with headers if it doesn't exist
         if not os.path.exists(self.csv_file_path):
@@ -36,11 +36,17 @@ class RoumuData:
         users = []
         try:
             with open(self.csv_file_path, newline="", encoding="utf-8") as csvfile:
-                reader = csv.DictReader(csvfile, fieldnames=self.fieldnames)
-                next(reader)  # Skip header row
+                reader = csv.DictReader(csvfile)
                 for row in reader:
                     if row and row.get("user_id"):  # Skip empty rows
-                        users.append(row)
+                        # Ensure all required fields exist with default values
+                        normalized_row = {
+                            "user_id": row.get("user_id", ""),
+                            "consecutive_count": row.get("consecutive_count", "0"),
+                            "total_count": row.get("total_count", row.get("consecutive_count", "0")),
+                            "last_checkin": row.get("last_checkin", ""),
+                        }
+                        users.append(normalized_row)
         except FileNotFoundError:
             # File doesn't exist yet, return empty list
             pass
@@ -70,6 +76,10 @@ class RoumuData:
         Returns:
             Dictionary with update results
         """
+        # Ensure CSV file exists with proper headers
+        if not os.path.exists(self.csv_file_path):
+            self._create_csv_file()
+
         users = self.load_all_users()
         current_time = datetime.now().isoformat()
 
@@ -83,6 +93,9 @@ class RoumuData:
                         "consecutive_count": int(user["consecutive_count"])
                         if user["consecutive_count"]
                         else 0,
+                        "total_count": int(user.get("total_count", "0"))
+                        if user.get("total_count")
+                        else 0,
                         "last_checkin": user["last_checkin"],
                         "was_new_user": False,
                         "already_checked_in": True,
@@ -94,10 +107,14 @@ class RoumuData:
         for user in users:
             if user["user_id"] == user_id:
                 # Update existing user
-                old_count = (
+                old_consecutive = (
                     int(user["consecutive_count"]) if user["consecutive_count"] else 0
                 )
-                user["consecutive_count"] = str(old_count + 1)
+                old_total = (
+                    int(user.get("total_count", "0")) if user.get("total_count") else 0
+                )
+                user["consecutive_count"] = str(old_consecutive + 1)
+                user["total_count"] = str(old_total + 1)
                 user["last_checkin"] = current_time
                 user_found = True
                 break
@@ -108,11 +125,13 @@ class RoumuData:
                 {
                     "user_id": user_id,
                     "consecutive_count": "1",
+                    "total_count": "1",
                     "last_checkin": current_time,
                 }
             )
 
         # Write back to CSV
+
         self._save_all_users(users)
 
         # Return result
@@ -120,6 +139,7 @@ class RoumuData:
         return {
             "user_id": user_id,
             "consecutive_count": int(updated_user["consecutive_count"]),
+            "total_count": int(updated_user.get("total_count", "0")),
             "last_checkin": updated_user["last_checkin"],
             "was_new_user": not user_found,
             "already_checked_in": False,
@@ -190,7 +210,14 @@ class RoumuData:
             writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
             writer.writeheader()
             for user in users:
-                writer.writerow(user)
+                # Ensure all required fields exist before writing
+                normalized_user = {
+                    "user_id": user.get("user_id", ""),
+                    "consecutive_count": user.get("consecutive_count", "0"),
+                    "total_count": user.get("total_count", "0"),
+                    "last_checkin": user.get("last_checkin", ""),
+                }
+                writer.writerow(normalized_user)
 
     def get_leaderboard(self, limit: int = 10) -> list[dict[str, any]]:
         """Get leaderboard sorted by consecutive count

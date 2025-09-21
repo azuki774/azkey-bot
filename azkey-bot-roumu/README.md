@@ -110,6 +110,7 @@ docker run --rm --env-file .env -v $(pwd)/data:/app/data azkey-bot-roumu check
 |-----------|------|
 | user_id | Misskey ユーザーID |
 | consecutive_count | 連続打刻回数 |
+| total_count | 累計打刻回数 |
 | last_checkin | 最後の打刻日時（ISO形式） |
 
 ### ⚠️ 重要な注意事項

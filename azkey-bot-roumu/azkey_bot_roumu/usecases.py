@@ -207,6 +207,7 @@ class Usecases:
         Returns:
             Dictionary containing check-in results
         """
+
         return self.roumu_data.update_checkin(user_id)
 
     def get_roumu_leaderboard(self, limit: int = 10) -> list:

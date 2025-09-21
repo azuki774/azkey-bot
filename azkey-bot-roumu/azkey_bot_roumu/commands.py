@@ -97,8 +97,9 @@ def dakoku_command(user_id):
         else:
             logger.info(
                 f'action=checkin_success user_id={user_id} username="{username}" '
-                f'consecutive_count={result["consecutive_count"]} last_checkin="{result["last_checkin"]}" '
-                f'was_new_user={result.get("was_new_user", False)} message="Check-in successful"'
+                f'consecutive_count={result["consecutive_count"]} total_count={result.get("total_count", 0)} '
+                f'last_checkin="{result["last_checkin"]}" was_new_user={result.get("was_new_user", False)} '
+                f'message="Check-in successful"'
             )
 
     except Exception as e:
@@ -279,7 +280,7 @@ def check_command():
                     logger.info(
                         f'action=checkin_success user_id={user_id} username="{username}" '
                         f"post_id={post_id} consecutive_count={result['consecutive_count']} "
-                        f"was_new_user={result.get('was_new_user', False)}"
+                        f"total_count={result.get('total_count', 0)} was_new_user={result.get('was_new_user', False)}"
                     )
 
                     # 根拠ノートにリアクションを追加

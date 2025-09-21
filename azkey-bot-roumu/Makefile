@@ -8,7 +8,7 @@ ROUMU_DATA_DIR := /app/data
 # Build targets
 .PHONY: build
 build:
-	docker build -t $(IMAGE_NAME) .
+	docker build --no-cache -t $(IMAGE_NAME) .
 
 # Single command execution
 .PHONY: run
@@ -42,7 +42,8 @@ dakoku:
 # Docker Compose operations
 .PHONY: compose-up
 compose-up:
-	docker compose up -d
+	docker compose build --no-cache
+	docker compose run --rm --build azkey-bot-roumu check
 
 .PHONY: compose-down
 compose-down:

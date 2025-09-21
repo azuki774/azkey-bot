@@ -2,7 +2,10 @@ version: '3.8'
 
 services:
   azkey-bot-roumu:
-    build: .
+    build:
+      context: .
+      args:
+        - BUILDKIT_INLINE_CACHE=0
     environment:
       # Misskey access token (required)
       - i=${MISSKEY_TOKEN}

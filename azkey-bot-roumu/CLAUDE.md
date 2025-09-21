@@ -95,8 +95,8 @@ The workflow fails if any linting errors or formatting issues are detected. Run 
 
 CSV file structure in `roumu.csv`:
 - `user_id`: Misskey user identifier
-- `username`: Display name (format: `username@host` or `username`)
 - `consecutive_count`: Number of consecutive check-ins
+- `total_count`: Cumulative total number of check-ins
 - `last_checkin`: ISO timestamp of last check-in (empty = can check-in)
 
 ## Docker Deployment
