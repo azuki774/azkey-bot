@@ -97,7 +97,7 @@ def dakoku_command(user_id):
         else:
             logger.info(
                 f'action=checkin_success user_id={user_id} username="{username}" '
-                f'consecutive_count={result["consecutive_count"]} total_count={result.get("total_count", 0)} '
+                f"consecutive_count={result['consecutive_count']} total_count={result.get('total_count', 0)} "
                 f'last_checkin="{result["last_checkin"]}" was_new_user={result.get("was_new_user", False)} '
                 f'message="Check-in successful"'
             )

@@ -15,7 +15,12 @@ class RoumuData:
             csv_file_path: Path to the CSV file (default: "roumu.csv")
         """
         self.csv_file_path = csv_file_path
-        self.fieldnames = ["user_id", "consecutive_count", "total_count", "last_checkin"]
+        self.fieldnames = [
+            "user_id",
+            "consecutive_count",
+            "total_count",
+            "last_checkin",
+        ]
 
         # Create CSV file with headers if it doesn't exist
         if not os.path.exists(self.csv_file_path):
@@ -43,7 +48,9 @@ class RoumuData:
                         normalized_row = {
                             "user_id": row.get("user_id", ""),
                             "consecutive_count": row.get("consecutive_count", "0"),
-                            "total_count": row.get("total_count", row.get("consecutive_count", "0")),
+                            "total_count": row.get(
+                                "total_count", row.get("consecutive_count", "0")
+                            ),
                             "last_checkin": row.get("last_checkin", ""),
                         }
                         users.append(normalized_row)
