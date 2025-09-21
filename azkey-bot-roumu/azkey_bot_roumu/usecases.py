@@ -16,7 +16,7 @@ class Usecases:
         """
         self.i = None
         self.openrouter_api_key = None
-        self.misskey_endpoint = "https://azkey.azuki.blue"
+        self.misskey_endpoint = os.getenv("MISSKEY_ENDPOINT", "https://azkey.azuki.blue")
 
         # Configure CSV file path
         if csv_dir:

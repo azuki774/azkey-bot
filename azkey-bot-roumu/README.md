@@ -41,6 +41,9 @@ export OPENROUTER_API_KEY="your_openrouter_api_key"
 
 # オプション: CSVファイル保存ディレクトリ（デフォルト: カレントディレクトリ）
 export ROUMU_DATA_DIR="/path/to/data/directory"
+
+# オプション: Misskeyサーバーエンドポイント（デフォルト: azkey.azuki.blue）
+export MISSKEY_ENDPOINT="https://your-misskey-instance.example.com"
 ```
 
 ## 使用方法

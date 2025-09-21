@@ -13,6 +13,8 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       # CSV data directory
       - ROUMU_DATA_DIR=/app/data
+      # Misskey server endpoint (optional)
+      - MISSKEY_ENDPOINT=${MISSKEY_ENDPOINT}
     volumes:
       # Persistent storage for CSV data
       - ./data:/app/data

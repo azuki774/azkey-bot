@@ -69,6 +69,7 @@ Required for API operations:
 
 Optional:
 - `ROUMU_DATA_DIR`: Directory path for CSV file storage (default: current directory)
+- `MISSKEY_ENDPOINT`: Misskey server endpoint (default: https://azkey.azuki.blue)
 
 ## Code Quality
 
