@@ -112,26 +112,37 @@ def serve_command(interval):
                             matching_posts.append(post)
 
                     successful_checkins = 0
+                    failed_checkins = 0
+                    already_checked_in = 0
                     for post in matching_posts:
                         user_id = post.get("user", {}).get("id")
                         if user_id:
                             try:
                                 result = usecases.checkin_roumu(user_id)
-                                if not result.get("already_checked_in", False):
+                                if result.get("already_checked_in", False):
+                                    already_checked_in += 1
+                                else:
                                     successful_checkins += 1
                                     post_id = post.get("id")
                                     if post_id:
                                         try:
                                             usecases.add_reaction_to_note(post_id, "👍")
-                                        except Exception:
-                                            pass
-                            except Exception:
-                                pass
+                                        except Exception as reaction_error:
+                                            logger.warning(
+                                                f'action=reaction_failed post_id={post_id} error="{reaction_error}"'
+                                            )
+                            except Exception as checkin_error:
+                                failed_checkins += 1
+                                logger.error(
+                                    f'action=checkin_failed user_id={user_id} post_id={post.get("id")} error="{checkin_error}"'
+                                )
 
                     logger.info(
                         f"action=check_complete cycle={cycle_count} "
                         f"matching_posts={len(matching_posts)} "
-                        f"successful_checkins={successful_checkins}"
+                        f"successful_checkins={successful_checkins} "
+                        f"already_count={already_checked_in} "
+                        f"failure_count={failed_checkins}"
                     )
                 else:
                     logger.info(
