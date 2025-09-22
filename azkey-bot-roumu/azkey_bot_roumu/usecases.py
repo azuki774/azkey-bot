@@ -301,18 +301,101 @@ class Usecases:
         misskey = self.get_misskey_client()
         return misskey.add_reaction(note_id=note_id, reaction=reaction)
 
-    def get_mentions(self, limit: int = 20, following: bool = True) -> dict:
-        """Get mentions
+    def get_mentions_without_reaction(
+        self, limit: int = 20, following: bool = True
+    ) -> list:
+        """Get mentions that haven't been reacted to yet
 
         Args:
             limit: Number of mentions to fetch (default: 20)
             following: Only show mentions from users you follow (default: True)
 
         Returns:
-            API response containing mentions list
+            List of mention notes that haven't been reacted to by the current user
 
         Raises:
             ValueError: If configuration is not loaded
         """
         misskey = self.get_misskey_client()
-        return misskey.get_mentions(limit=limit, following=following)
+
+        # Get current user's info to identify our own reactions
+        my_info = misskey.get_my_info()
+        my_user_id = my_info.get("id")
+
+        if not my_user_id:
+            raise ValueError("Could not get current user ID")
+
+        # Get mentions from API
+        mentions_response = misskey.get_mentions(limit=limit, following=following)
+        mentions = mentions_response if isinstance(mentions_response, list) else []
+
+        # Filter out mentions that have any reactions (from anyone)
+        unreacted_mentions = []
+
+        for mention in mentions:
+            reactions = mention.get("reactions", {})
+            my_reaction = mention.get("myReaction")
+
+            # Check if this mention has any reactions at all (from anyone)
+            # or if we specifically have reacted to it
+            has_any_reactions = bool(reactions) or bool(my_reaction)
+
+            # Only include mentions that have no reactions at all
+            if not has_any_reactions:
+                unreacted_mentions.append(mention)
+
+        return unreacted_mentions
+
+    def reply_user_info(self, note: dict) -> dict:
+        """Reply to a user with their roumu information
+
+        Args:
+            note: Note object containing user information and note ID
+
+        Returns:
+            API response from creating the reply note
+
+        Raises:
+            ValueError: If configuration is not loaded or required data is missing
+        """
+        # Extract user ID from note
+        user_id = note.get("userId") or note.get("user", {}).get("id")
+        if not user_id:
+            raise ValueError("Could not extract user ID from note")
+
+        note_id = note.get("id")
+        if not note_id:
+            raise ValueError("Could not extract note ID from note")
+
+        username = note.get("user", {}).get("username", "unknown")
+
+        # Determine user type based on host
+        user_host = note.get("user", {}).get("host")
+        if user_host is None:  # ローカルユーザの場合は、host: null になる
+            user_remote_type_text = "正社員"
+        else:
+            user_remote_type_text = "パートナー"
+
+        # Get user's roumu data from CSV
+        roumu_data = self.roumu_data.get_user(user_id)
+
+        # Format user information for reply
+        if roumu_data:
+            consecutive_count = int(roumu_data.get("consecutive_count", 0))
+            total_count = int(roumu_data.get("total_count", 0))
+            last_checkin = roumu_data.get("last_checkin", "")
+
+            reply_text = f"""@{username} さんの勤怠情報📊
+📓 ユーザ種別: {user_remote_type_text}
+🔥 連続出勤: {consecutive_count}日
+📈 累計出勤: {total_count}回
+📅 今日の出勤: {last_checkin if last_checkin else "まだありません"}
+"""
+        else:
+            # User not found in database
+            reply_text = f"""@{username} さんはまだ出勤データがありません
+"""
+
+        # Send reply using Misskey API
+        misskey = self.get_misskey_client()
+        return misskey.create_note(text=reply_text, reply_id=note_id)

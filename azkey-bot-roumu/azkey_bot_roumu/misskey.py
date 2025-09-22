@@ -174,3 +174,37 @@ class Misskey:
         payload = {"noteId": note_id, "reaction": reaction}
 
         return self.post("/api/notes/reactions/create", payload)
+
+    def get_mentions(self, limit: int = 20, following: bool = True) -> dict:
+        """Get mentions from other users
+
+        Args:
+            limit: Number of mentions to fetch (default: 20)
+            following: If True, only get mentions from users you follow (default: True)
+
+        Returns:
+            API response containing mentions list
+        """
+        payload = {"limit": limit, "following": following}
+
+        return self.post("/api/notes/mentions", payload)
+
+    def create_note(
+        self, text: str, reply_id: str = None, visibility: str = "public"
+    ) -> dict:
+        """Create a new note (post) or reply to an existing note
+
+        Args:
+            text: Note content
+            reply_id: ID of the note to reply to (optional)
+            visibility: Note visibility ("public", "home", "followers", "specified")
+
+        Returns:
+            API response containing created note information
+        """
+        payload = {"text": text, "visibility": visibility}
+
+        if reply_id:
+            payload["replyId"] = reply_id
+
+        return self.post("/api/notes/create", payload)
