@@ -387,24 +387,31 @@ class Usecases:
 
         username = note.get("user", {}).get("username", "unknown")
 
+        # Determine user type based on host
+        user_host = note.get("user", {}).get("host")
+        if user_host is None:  # ローカルユーザの場合は、host: null になる
+            user_remote_type_text = "正社員"
+        else:
+            user_remote_type_text = "パートナー"
+
         # Get user's roumu data from CSV
-        user_data = self.roumu_data.get_user(user_id)
+        roumu_data = self.roumu_data.get_user(user_id)
 
         # Format user information for reply
-        if user_data:
-            consecutive_count = int(user_data.get("consecutive_count", 0))
-            total_count = int(user_data.get("total_count", 0))
-            last_checkin = user_data.get("last_checkin", "")
+        if roumu_data:
+            consecutive_count = int(roumu_data.get("consecutive_count", 0))
+            total_count = int(roumu_data.get("total_count", 0))
+            last_checkin = roumu_data.get("last_checkin", "")
 
-            reply_text = f"""@{username} さんのログボ情報📊
-
-🔥 連続ログボ: {consecutive_count}日
-📈 累計ログボ: {total_count}回
-📅 今日のログボ: {last_checkin if last_checkin else "まだありません"}
+            reply_text = f"""@{username} さんの勤怠情報📊
+📓 ユーザ種別: {user_remote_type_text}
+🔥 連続出勤: {consecutive_count}日
+📈 累計出勤: {total_count}回
+📅 今日の出勤: {last_checkin if last_checkin else "まだありません"}
 """
         else:
             # User not found in database
-            reply_text = f"""@{username} さんはまだログボデータがありません
+            reply_text = f"""@{username} さんはまだ出勤データがありません
 """
 
         # Send reply using Misskey API
