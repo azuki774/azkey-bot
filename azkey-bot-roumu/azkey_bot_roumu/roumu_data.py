@@ -1,7 +1,9 @@
 """Roumu data management for CSV persistence"""
 
 import csv
+import fcntl
 import os
+from contextlib import contextmanager
 from datetime import datetime
 
 
@@ -26,9 +28,26 @@ class RoumuData:
         if not os.path.exists(self.csv_file_path):
             self._create_csv_file()
 
+    @contextmanager
+    def _file_lock(self, mode="r"):
+        """File locking context manager for safe concurrent access
+
+        Args:
+            mode: File mode ('r' for read, 'w' for write, 'a' for append)
+
+        Yields:
+            File object with appropriate lock applied
+        """
+        with open(self.csv_file_path, mode, newline="", encoding="utf-8") as f:
+            if "w" in mode or "a" in mode:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock for writing
+            else:
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # Shared lock for reading
+            yield f
+
     def _create_csv_file(self):
         """Create CSV file with headers"""
-        with open(self.csv_file_path, "w", newline="", encoding="utf-8") as csvfile:
+        with self._file_lock("w") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
             writer.writeheader()
 
@@ -40,7 +59,7 @@ class RoumuData:
         """
         users = []
         try:
-            with open(self.csv_file_path, newline="", encoding="utf-8") as csvfile:
+            with self._file_lock("r") as csvfile:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
                     if row and row.get("user_id"):  # Skip empty rows
@@ -247,7 +266,7 @@ class RoumuData:
         Args:
             users: List of user dictionaries to save
         """
-        with open(self.csv_file_path, "w", newline="", encoding="utf-8") as csvfile:
+        with self._file_lock("w") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
             writer.writeheader()
             for user in users:
