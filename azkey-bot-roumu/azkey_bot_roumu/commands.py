@@ -104,7 +104,7 @@ def serve_command(interval):
                 )
                 timeline = usecases.get_timeline(limit=100)
                 if timeline:
-                    TARGET_KEYWORDS = ["ログインボーナス", "ログボ", "打刻"]
+                    TARGET_KEYWORDS = ["ログインボーナス", "ログボ", "打刻", "出勤"]
                     matching_posts = []
                     for post in timeline:
                         text = post.get("text", "")
