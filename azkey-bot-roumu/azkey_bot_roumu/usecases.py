@@ -300,3 +300,19 @@ class Usecases:
         """
         misskey = self.get_misskey_client()
         return misskey.add_reaction(note_id=note_id, reaction=reaction)
+
+    def get_mentions(self, limit: int = 20, following: bool = True) -> dict:
+        """Get mentions
+
+        Args:
+            limit: Number of mentions to fetch (default: 20)
+            following: Only show mentions from users you follow (default: True)
+
+        Returns:
+            API response containing mentions list
+
+        Raises:
+            ValueError: If configuration is not loaded
+        """
+        misskey = self.get_misskey_client()
+        return misskey.get_mentions(limit=limit, following=following)
