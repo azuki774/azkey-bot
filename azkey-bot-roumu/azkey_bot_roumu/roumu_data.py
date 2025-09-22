@@ -1,10 +1,15 @@
 """Roumu data management for CSV persistence"""
 
 import csv
-import fcntl
 import os
 from contextlib import contextmanager
 from datetime import datetime
+
+# Import fcntl for Unix systems, set to None for Windows compatibility
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 
 class RoumuData:
@@ -32,21 +37,56 @@ class RoumuData:
     def _file_lock(self, mode="r"):
         """File locking context manager for safe concurrent access
 
+        This implementation fixes the race condition by acquiring the lock
+        before truncating the file in write mode.
+
         Args:
             mode: File mode ('r' for read, 'w' for write, 'a' for append)
 
         Yields:
             File object with appropriate lock applied
         """
-        with open(self.csv_file_path, mode, newline="", encoding="utf-8") as f:
-            if "w" in mode or "a" in mode:
+        if fcntl is None:
+            # Fallback for systems without fcntl (e.g., Windows)
+            with open(self.csv_file_path, mode, newline="", encoding="utf-8") as f:
+                yield f
+            return
+
+        if "w" in mode:
+            # For write mode, we need to avoid the race condition where
+            # open("w") truncates before we can acquire the lock
+
+            # First, open in read+write mode without truncating
+            with open(self.csv_file_path, "r+", newline="", encoding="utf-8") as f:
+                # Acquire exclusive lock first
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+                # Now safely clear the file contents for writing
+                # (truncate() removes all existing data to prepare for new content)
+                f.seek(0)  # Move to beginning of file
+                f.truncate()  # Clear all file contents (file size becomes 0)
+
+                yield f
+
+        elif "a" in mode:
+            # For append mode, no truncation occurs, so we can open normally
+            with open(self.csv_file_path, mode, newline="", encoding="utf-8") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock for writing
-            else:
+                yield f
+
+        else:
+            # For read mode, open normally
+            with open(self.csv_file_path, mode, newline="", encoding="utf-8") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # Shared lock for reading
-            yield f
+                yield f
 
     def _create_csv_file(self):
         """Create CSV file with headers"""
+        # If file doesn't exist, create it first for r+ mode to work
+        if not os.path.exists(self.csv_file_path):
+            with open(self.csv_file_path, "w", newline="", encoding="utf-8"):
+                pass  # Create empty file
+
         with self._file_lock("w") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
             writer.writeheader()
