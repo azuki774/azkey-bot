@@ -329,37 +329,19 @@ class Usecases:
         mentions_response = misskey.get_mentions(limit=limit, following=following)
         mentions = mentions_response if isinstance(mentions_response, list) else []
 
-        # Filter out mentions we've already reacted to
+        # Filter out mentions that have any reactions (from anyone)
         unreacted_mentions = []
 
         for mention in mentions:
             reactions = mention.get("reactions", {})
+            my_reaction = mention.get("myReaction")
 
-            # Check if we've reacted to this mention
-            has_my_reaction = False
-            for _reaction_emoji, reaction_users in reactions.items():
-                # reaction_users can be a list of user objects or user IDs
-                if isinstance(reaction_users, list):
-                    for reaction_user in reaction_users:
-                        user_id = (
-                            reaction_user.get("id")
-                            if isinstance(reaction_user, dict)
-                            else reaction_user
-                        )
-                        if user_id == my_user_id:
-                            has_my_reaction = True
-                            break
-                elif isinstance(reaction_users, (int, str)) and str(
-                    reaction_users
-                ) == str(my_user_id):
-                    # Single reaction count (older format)
-                    has_my_reaction = True
+            # Check if this mention has any reactions at all (from anyone)
+            # or if we specifically have reacted to it
+            has_any_reactions = bool(reactions) or bool(my_reaction)
 
-                if has_my_reaction:
-                    break
-
-            # Only include mentions we haven't reacted to
-            if not has_my_reaction:
+            # Only include mentions that have no reactions at all
+            if not has_any_reactions:
                 unreacted_mentions.append(mention)
 
         return unreacted_mentions
