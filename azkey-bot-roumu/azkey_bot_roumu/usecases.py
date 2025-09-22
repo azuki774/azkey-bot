@@ -301,18 +301,112 @@ class Usecases:
         misskey = self.get_misskey_client()
         return misskey.add_reaction(note_id=note_id, reaction=reaction)
 
-    def get_mentions(self, limit: int = 20, following: bool = True) -> dict:
-        """Get mentions
+    def get_mentions_without_reaction(
+        self, limit: int = 20, following: bool = True
+    ) -> list:
+        """Get mentions that haven't been reacted to yet
 
         Args:
             limit: Number of mentions to fetch (default: 20)
             following: Only show mentions from users you follow (default: True)
 
         Returns:
-            API response containing mentions list
+            List of mention notes that haven't been reacted to by the current user
 
         Raises:
             ValueError: If configuration is not loaded
         """
         misskey = self.get_misskey_client()
-        return misskey.get_mentions(limit=limit, following=following)
+
+        # Get current user's info to identify our own reactions
+        my_info = misskey.get_my_info()
+        my_user_id = my_info.get("id")
+
+        if not my_user_id:
+            raise ValueError("Could not get current user ID")
+
+        # Get mentions from API
+        mentions_response = misskey.get_mentions(limit=limit, following=following)
+        mentions = mentions_response if isinstance(mentions_response, list) else []
+
+        # Filter out mentions we've already reacted to
+        unreacted_mentions = []
+
+        for mention in mentions:
+            reactions = mention.get("reactions", {})
+
+            # Check if we've reacted to this mention
+            has_my_reaction = False
+            for _reaction_emoji, reaction_users in reactions.items():
+                # reaction_users can be a list of user objects or user IDs
+                if isinstance(reaction_users, list):
+                    for reaction_user in reaction_users:
+                        user_id = (
+                            reaction_user.get("id")
+                            if isinstance(reaction_user, dict)
+                            else reaction_user
+                        )
+                        if user_id == my_user_id:
+                            has_my_reaction = True
+                            break
+                elif isinstance(reaction_users, (int, str)) and str(
+                    reaction_users
+                ) == str(my_user_id):
+                    # Single reaction count (older format)
+                    has_my_reaction = True
+
+                if has_my_reaction:
+                    break
+
+            # Only include mentions we haven't reacted to
+            if not has_my_reaction:
+                unreacted_mentions.append(mention)
+
+        return unreacted_mentions
+
+    def reply_user_info(self, note: dict) -> dict:
+        """Reply to a user with their roumu information
+
+        Args:
+            note: Note object containing user information and note ID
+
+        Returns:
+            API response from creating the reply note
+
+        Raises:
+            ValueError: If configuration is not loaded or required data is missing
+        """
+        # Extract user ID from note
+        user_id = note.get("userId") or note.get("user", {}).get("id")
+        if not user_id:
+            raise ValueError("Could not extract user ID from note")
+
+        note_id = note.get("id")
+        if not note_id:
+            raise ValueError("Could not extract note ID from note")
+
+        username = note.get("user", {}).get("username", "unknown")
+
+        # Get user's roumu data from CSV
+        user_data = self.roumu_data.get_user(user_id)
+
+        # Format user information for reply
+        if user_data:
+            consecutive_count = int(user_data.get("consecutive_count", 0))
+            total_count = int(user_data.get("total_count", 0))
+            last_checkin = user_data.get("last_checkin", "")
+
+            reply_text = f"""@{username} さんのログボ情報📊
+
+🔥 連続ログボ: {consecutive_count}日
+📈 累計ログボ: {total_count}回
+📅 今日のログボ: {last_checkin if last_checkin else "まだありません"}
+"""
+        else:
+            # User not found in database
+            reply_text = f"""@{username} さんはまだログボデータがありません
+"""
+
+        # Send reply using Misskey API
+        misskey = self.get_misskey_client()
+        return misskey.create_note(text=reply_text, reply_id=note_id)

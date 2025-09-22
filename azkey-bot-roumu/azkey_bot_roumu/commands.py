@@ -151,6 +151,76 @@ def serve_command(interval):
             except Exception as e:
                 logger.error(f'action=check_error cycle={cycle_count} error="{e}"')
 
+            # メンションが来ていないか確認し、来ていたら処理する
+            try:
+                logger.info(
+                    f'action=mention_check cycle={cycle_count} message="Checking for new mentions"'
+                )
+
+                # フォロー中ユーザーからのリアクションしていないメンション取得
+                mentions = usecases.get_mentions_without_reaction(
+                    limit=20, following=True
+                )
+
+                if mentions:
+                    logger.info(
+                        f'action=mentions_found cycle={cycle_count} count={len(mentions)} message="Processing mentions"'
+                    )
+
+                    for i, mention in enumerate(mentions, 1):
+                        user = mention.get("user", {})
+                        user_id = user.get("id", "")
+                        username = user.get("username", "unknown")
+                        mention_id = mention.get("id", "")
+                        text = mention.get("text", "")
+
+                        logger.info(
+                            f"action=mention_process cycle={cycle_count} mention_number={i} "
+                            f'user_id={user_id} username="{username}" mention_id={mention_id}'
+                        )
+
+                        try:
+                            # ユーザー情報をリプライで返す
+                            reply_result = usecases.reply_user_info(mention)
+
+                            logger.info(
+                                f"action=mention_reply_success cycle={cycle_count} "
+                                f'user_id={user_id} username="{username}" mention_id={mention_id} '
+                                f"reply_id={reply_result.get('createdNote', {}).get('id', 'unknown')}"
+                            )
+
+                            # メンションにリアクションを追加（処理済みマーク）
+                            try:
+                                usecases.add_reaction_to_note(mention_id, "👍")
+                                logger.info(
+                                    f"action=mention_reaction_added cycle={cycle_count} mention_id={mention_id} reaction=👍"
+                                )
+                            except Exception as reaction_error:
+                                logger.warning(
+                                    f"action=mention_reaction_failed cycle={cycle_count} "
+                                    f'mention_id={mention_id} error="{reaction_error}"'
+                                )
+
+                        except Exception as reply_error:
+                            logger.error(
+                                f"action=mention_reply_failed cycle={cycle_count} "
+                                f'user_id={user_id} username="{username}" mention_id={mention_id} error="{reply_error}"'
+                            )
+
+                    logger.info(
+                        f"action=mention_processing_complete cycle={cycle_count} "
+                        f'processed_count={len(mentions)} message="All mentions processed"'
+                    )
+                else:
+                    logger.info(
+                        f'action=no_new_mentions cycle={cycle_count} message="No new mentions found"'
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f'action=mention_check_error cycle={cycle_count} error="{e}"'
+                )
+
             logger.info(
                 f'action=serve_cycle_complete cycle={cycle_count} message="Cycle completed"'
             )
