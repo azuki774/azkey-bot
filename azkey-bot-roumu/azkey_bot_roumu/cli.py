@@ -1,13 +1,9 @@
 import click
 
 from .commands import (
-    check_command,
-    dakoku_command,
-    follow_command,
     reset_command,
     serve_command,
     status_command,
-    timeline_command,
 )
 
 
@@ -19,10 +15,6 @@ def cli():
 
 
 cli.add_command(status_command)
-cli.add_command(follow_command)
-cli.add_command(dakoku_command)
-cli.add_command(timeline_command)
-cli.add_command(check_command)
 cli.add_command(reset_command)
 cli.add_command(serve_command)
 
