@@ -1,4 +1,6 @@
 import os
+import signal
+import time
 
 import click
 
@@ -355,4 +357,141 @@ def reset_command():
 
     except Exception as e:
         logger.error(f'action=reset_error error="{e}"')
+        raise
+
+
+@click.command("serve")
+@click.option("--interval", default=300, help="Interval in seconds between runs (default: 300 = 5 minutes)")
+def serve_command(interval):
+    """Serve mode: Run follow and check commands continuously with specified interval"""
+    logger = setup_logger(__name__)
+
+    # Flag to control the main loop
+    shutdown_requested = False
+
+    def signal_handler(signum, _frame):
+        nonlocal shutdown_requested
+        signal_name = signal.Signals(signum).name
+        logger.info(f'action=signal_received signal={signal_name} message="Shutdown requested"')
+        shutdown_requested = True
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    try:
+        csv_dir = os.getenv("ROUMU_DATA_DIR")
+        usecases = Usecases(csv_dir=csv_dir)
+        usecases.load_environment_variables()
+
+        logger.info(f'action=serve_start interval={interval} message="Starting serve mode"')
+
+        cycle_count = 0
+
+        while not shutdown_requested:
+            cycle_count += 1
+            logger.info(f'action=serve_cycle_start cycle={cycle_count} message="Starting new cycle"')
+
+            # Execute follow command
+            try:
+                logger.info(f'action=follow_execute cycle={cycle_count} message="Executing follow command"')
+                result = usecases.follow_back(limit=100)
+
+                logger.info(
+                    f"action=follow_complete cycle={cycle_count} total_followers={result['total_followers']} "
+                    f"total_following={result['total_following']} "
+                    f"users_to_follow_back={result['users_to_follow_back']} "
+                    f"success_count={result['success_count']} "
+                    f"failure_count={result['failure_count']}"
+                )
+
+            except Exception as e:
+                logger.error(f'action=follow_error cycle={cycle_count} error="{e}"')
+
+            # Execute check command
+            try:
+                logger.info(f'action=check_execute cycle={cycle_count} message="Executing check command"')
+
+                TARGET_KEYWORDS = ["ログインボーナス", "ログボ", "打刻"]
+
+                timeline = usecases.get_timeline(limit=100)
+
+                if timeline:
+                    # Find matching posts
+                    matching_posts = []
+                    for post in timeline:
+                        text = post.get("text", "")
+                        if text:
+                            for keyword in TARGET_KEYWORDS:
+                                if keyword in text:
+                                    matching_posts.append(post)
+                                    break
+
+                    logger.info(
+                        f'action=keyword_match_complete cycle={cycle_count} '
+                        f'matching_posts={len(matching_posts)} timeline_posts={len(timeline)}'
+                    )
+
+                    # Process check-ins
+                    successful_checkins = 0
+                    failed_checkins = 0
+                    already_checked_in = 0
+
+                    for post in matching_posts:
+                        user = post.get("user", {})
+                        user_id = user.get("id", "")
+                        post_id = post.get("id", "")
+
+                        if not user_id:
+                            failed_checkins += 1
+                            continue
+
+                        try:
+                            result = usecases.checkin_roumu(user_id)
+
+                            if result.get("already_checked_in", False):
+                                already_checked_in += 1
+                            else:
+                                successful_checkins += 1
+                                # Add reaction
+                                try:
+                                    usecases.add_reaction_to_note(post_id, "👍")
+                                except Exception:
+                                    pass  # Don't fail the whole process for reaction errors
+
+                        except Exception:
+                            failed_checkins += 1
+
+                    logger.info(
+                        f"action=check_complete cycle={cycle_count} matching_posts={len(matching_posts)} "
+                        f"success_count={successful_checkins} "
+                        f"already_count={already_checked_in} "
+                        f"failure_count={failed_checkins}"
+                    )
+                else:
+                    logger.info(f'action=timeline_empty cycle={cycle_count} message="Timeline is empty"')
+
+            except Exception as e:
+                logger.error(f'action=check_error cycle={cycle_count} error="{e}"')
+
+            logger.info(f'action=serve_cycle_complete cycle={cycle_count} message="Cycle completed"')
+
+            # Check for shutdown before sleeping
+            if shutdown_requested:
+                break
+
+            # Wait for the specified interval with periodic checks for shutdown
+            logger.info(f'action=serve_sleep cycle={cycle_count} interval={interval} message="Sleeping until next cycle"')
+            sleep_remaining = interval
+            while sleep_remaining > 0 and not shutdown_requested:
+                sleep_time = min(1, sleep_remaining)  # Check every second
+                time.sleep(sleep_time)
+                sleep_remaining -= sleep_time
+
+        logger.info(f'action=serve_stop cycle={cycle_count} message="Serve mode stopped gracefully"')
+
+    except KeyboardInterrupt:
+        logger.info(f'action=serve_stop cycle={cycle_count} message="Serve mode stopped by user (KeyboardInterrupt)"')
+    except Exception as e:
+        logger.error(f'action=serve_error cycle={cycle_count} error="{e}"')
         raise

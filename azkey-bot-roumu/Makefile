@@ -43,6 +43,10 @@ dakoku:
 reset:
 	docker run --rm --env-file $(ENV_FILE) -e ROUMU_DATA_DIR=$(ROUMU_DATA_DIR) -v $(DATA_DIR):/app/data $(IMAGE_NAME) reset
 
+.PHONY: serve
+serve:
+	docker run --rm --env-file $(ENV_FILE) -e ROUMU_DATA_DIR=$(ROUMU_DATA_DIR) -v $(DATA_DIR):/app/data $(IMAGE_NAME) serve
+
 # Docker Compose operations
 .PHONY: compose-up
 compose-up:

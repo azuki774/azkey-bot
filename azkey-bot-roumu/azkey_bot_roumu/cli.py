@@ -5,6 +5,7 @@ from .commands import (
     dakoku_command,
     follow_command,
     reset_command,
+    serve_command,
     status_command,
     timeline_command,
 )
@@ -23,6 +24,7 @@ cli.add_command(dakoku_command)
 cli.add_command(timeline_command)
 cli.add_command(check_command)
 cli.add_command(reset_command)
+cli.add_command(serve_command)
 
 
 if __name__ == "__main__":
