@@ -72,7 +72,13 @@ class Misskey:
                     f"HTTP {response.status_code}: {response.text}"
                 ) from None
 
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as e:
+            # JSONパースに失敗した場合
+            raise requests.RequestException(
+                f"Invalid JSON response: {response.text[:200]}..."
+            ) from e
 
     def get_followers(self, user_id: str, limit: int = 100) -> dict:
         """Get user's followers list
@@ -136,7 +142,7 @@ class Misskey:
 
         return self.post("/api/users/show", payload)
 
-    def get_timeline(self, limit: int = 100, until_id: str = None) -> dict:
+    def get_timeline(self, limit: int = 100, until_id: str = None) -> tuple[list, str | None]:
         """Get timeline posts
 
         Args:
@@ -144,14 +150,19 @@ class Misskey:
             until_id: Get posts before this ID for pagination
 
         Returns:
-            API response containing timeline posts
+            Tuple of (timeline posts list, latest note ID or None if empty)
         """
         payload = {"limit": limit}
 
         if until_id:
             payload["untilId"] = until_id
 
-        return self.post("/api/notes/timeline", payload)
+        timeline_data = self.post("/api/notes/timeline", payload)
+
+        # timeline_data is a list of notes, get the latest ID (first item)
+        latest_id = timeline_data[0]["id"] if timeline_data else None
+
+        return timeline_data, latest_id
 
     def add_reaction(self, note_id: str, reaction: str) -> dict:
         """Add reaction to a note

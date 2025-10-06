@@ -68,6 +68,7 @@ def serve_command(interval):
     signal.signal(signal.SIGINT, signal_handler)
 
     try:
+        read_latest_id = None  # どこまで既に読み込み済か
         csv_dir = os.getenv("ROUMU_DATA_DIR")
         usecases = Usecases(csv_dir=csv_dir)
         usecases.load_environment_variables()
@@ -102,7 +103,11 @@ def serve_command(interval):
                 logger.info(
                     f'action=check_execute cycle={cycle_count} message="Executing check operations"'
                 )
-                timeline = usecases.get_timeline(limit=100)
+                timeline, read_latest_id = usecases.get_timeline(limit=100, until_id=read_latest_id)
+                notes_count = len(timeline) if timeline else 0
+                logger.info(
+                    f'action=check_execute cycle={cycle_count} notes_read={notes_count} message="Read timeline notes"'
+                )
                 if timeline:
                     TARGET_KEYWORDS = ["ログインボーナス", "ログボ", "打刻", "出勤"]
                     matching_posts = []
