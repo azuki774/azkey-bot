@@ -101,7 +101,7 @@ def serve_command(interval):
 
             try:
                 logger.info(
-                    f'action=check_execute cycle={cycle_count} message="Executing check operations"'
+                    f'action=check_execute cycle={cycle_count} read_latest_id={read_latest_id} message="Executing check operations"'
                 )
                 timeline, read_latest_id = usecases.get_timeline(
                     limit=100, until_id=read_latest_id
