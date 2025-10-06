@@ -142,7 +142,9 @@ class Misskey:
 
         return self.post("/api/users/show", payload)
 
-    def get_timeline(self, limit: int = 100, until_id: str = None) -> tuple[list, str | None]:
+    def get_timeline(
+        self, limit: int = 100, until_id: str = None
+    ) -> tuple[list, str | None]:
         """Get timeline posts
 
         Args:

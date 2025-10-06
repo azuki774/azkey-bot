@@ -55,7 +55,7 @@ def serve_command(interval):
     # Flag to control the main loop
     shutdown_requested = False
 
-    def signal_handler(signum, _frame):
+    def signal_handler(signum, _):
         nonlocal shutdown_requested
         signal_name = signal.Signals(signum).name
         logger.info(
@@ -103,7 +103,9 @@ def serve_command(interval):
                 logger.info(
                     f'action=check_execute cycle={cycle_count} message="Executing check operations"'
                 )
-                timeline, read_latest_id = usecases.get_timeline(limit=100, until_id=read_latest_id)
+                timeline, read_latest_id = usecases.get_timeline(
+                    limit=100, until_id=read_latest_id
+                )
                 notes_count = len(timeline) if timeline else 0
                 logger.info(
                     f'action=check_execute cycle={cycle_count} notes_read={notes_count} message="Read timeline notes"'
