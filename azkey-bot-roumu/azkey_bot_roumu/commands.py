@@ -2,10 +2,11 @@ import os
 import signal
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import HTTPServer
 
 import click
 
+from .http_handler import create_http_handler
 from .logger import setup_logger
 from .usecases import Usecases
 
@@ -77,57 +78,15 @@ def serve_command(interval, http_port):
 
     csv_dir = os.getenv("ROUMU_DATA_DIR")
 
-    # HTTP server setup
+    # reset などを行うためのトリガーとして、HTTPサーバを起動
     http_server = None
     if http_port:
-
-        class ResetHTTPRequestHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                """Handle GET requests for various endpoints"""
-                if self.path == "/reset":
-                    self._handle_reset()
-                else:
-                    self.send_response(404)
-                    self.end_headers()
-
-            def _handle_reset(self):
-                """Handle /reset endpoint - execute reset_command logic"""
-                try:
-                    logger.info(
-                        f'action=http_reset_start remote_addr={self.client_address[0]} message="HTTP reset request received"'
-                    )
-
-                    # Execute reset logic (same as reset_command)
-                    usecases = Usecases(csv_dir=csv_dir)
-                    result = usecases.reset_count()
-
-                    # Log results
-                    logger.info(
-                        f"action=http_reset_complete total_users={result['total_users']} "
-                        f"consecutive_count_reset={result['consecutive_count_reset']} "
-                        f"last_checkin_reset={result['last_checkin_reset']} "
-                        f'message="{result["message"]}"'
-                    )
-
-                    # Send 200 OK response with empty body
-                    self.send_response(200)
-                    self.end_headers()
-
-                except Exception as e:
-                    logger.error(f'action=http_reset_error error="{e}"')
-                    self.send_response(500)
-                    self.end_headers()
-
-            def log_message(self, _format, *_args):
-                """Suppress default HTTP server logs"""
-                pass
+        handler_class = create_http_handler(csv_dir=csv_dir, logger=logger)
 
         def start_http_server():
             nonlocal http_server
             try:
-                http_server = HTTPServer(
-                    ("0.0.0.0", http_port), ResetHTTPRequestHandler
-                )
+                http_server = HTTPServer(("0.0.0.0", http_port), handler_class)
                 logger.info(
                     f'action=http_server_start port={http_port} message="HTTP server started"'
                 )
