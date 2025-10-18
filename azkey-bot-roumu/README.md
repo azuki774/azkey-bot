@@ -70,6 +70,23 @@ azkey-bot-roumu timeline --limit 10
 azkey-bot-roumu reset
 ```
 
+### サーバーモード（HTTP エンドポイント付き）
+
+`serve` コマンドを使用すると、定期的なタイムラインチェックとフォローバックを実行しながら、HTTP エンドポイントでリセット操作を受け付けることができます：
+
+```bash
+# HTTP サーバーをポート 8080 で起動（インターバル 300秒）
+azkey-bot-roumu serve --interval 300 --http-port 8080
+
+# 別のターミナルから POST リクエストでリセットを実行
+curl -X POST http://localhost:8080/reset
+```
+
+**エンドポイント:**
+- `POST /reset` - 全ユーザーのカウントをリセット（ステータスコード 200 を返す）
+
+これにより、外部システムから webhook などでリセット処理をトリガーできます。
+
 ### 自動実行
 
 本格運用では定期実行を設定してください：
