@@ -7,8 +7,8 @@ def create_http_handler(csv_dir, logger):
     """Factory function to create HTTP request handler with injected dependencies"""
 
     class HTTPRequestHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            """Handle GET requests for various endpoints"""
+        def do_POST(self):
+            """Handle POST requests for various endpoints"""
             if self.path == "/reset":
                 self._handle_reset()
             else:
