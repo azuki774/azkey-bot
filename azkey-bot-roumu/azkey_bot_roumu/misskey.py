@@ -75,9 +75,9 @@ class Misskey:
         try:
             return response.json()
         except ValueError as e:
-            # JSONパースに失敗した場合
+            # JSONパースに失敗した場合 - 全文を表示
             raise requests.RequestException(
-                f"Invalid JSON response: {response.text[:200]}..."
+                f"Invalid JSON response: {response.text}"
             ) from e
 
     def get_followers(self, user_id: str, limit: int = 100) -> dict:

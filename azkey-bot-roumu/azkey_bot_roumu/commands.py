@@ -1,9 +1,12 @@
 import os
 import signal
+import threading
 import time
+from http.server import HTTPServer
 
 import click
 
+from .http_handler import create_http_handler
 from .logger import setup_logger
 from .usecases import Usecases
 
@@ -48,7 +51,13 @@ def reset_command():
     default=300,
     help="Interval in seconds between runs (default: 300 = 5 minutes)",
 )
-def serve_command(interval):
+@click.option(
+    "--http-port",
+    default=8080,
+    type=int,
+    help="HTTP server port for webhook endpoint (optional, default: disabled)",
+)
+def serve_command(interval, http_port):
     """Serve mode: Run follow and check commands continuously with specified interval"""
     logger = setup_logger(__name__)
 
@@ -67,9 +76,33 @@ def serve_command(interval):
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
+    csv_dir = os.getenv("ROUMU_DATA_DIR")
+
+    # reset などを行うためのトリガーとして、HTTPサーバを起動
+    http_server = None
+    if http_port:
+        handler_class = create_http_handler(csv_dir=csv_dir, logger=logger)
+
+        def start_http_server():
+            nonlocal http_server
+            try:
+                http_server = HTTPServer(("0.0.0.0", http_port), handler_class)
+                logger.info(
+                    f'action=http_server_start port={http_port} message="HTTP server started"'
+                )
+                http_server.serve_forever()
+            except Exception as e:
+                logger.error(f'action=http_server_error error="{e}"')
+
+        # Start HTTP server in a separate thread
+        http_thread = threading.Thread(target=start_http_server, daemon=True)
+        http_thread.start()
+        logger.info(
+            f'action=http_server_thread_started port={http_port} message="HTTP server thread started"'
+        )
+
     try:
         read_latest_id = None  # どこまで既に読み込み済か
-        csv_dir = os.getenv("ROUMU_DATA_DIR")
         usecases = Usecases(csv_dir=csv_dir)
         usecases.load_environment_variables()
 
@@ -258,3 +291,11 @@ def serve_command(interval):
     except Exception as e:
         logger.error(f'action=serve_error cycle={cycle_count} error="{e}"')
         raise
+    finally:
+        # Shutdown HTTP server if it's running
+        if http_server:
+            logger.info(
+                'action=http_server_shutdown message="Shutting down HTTP server"'
+            )
+            http_server.shutdown()
+            logger.info('action=http_server_stopped message="HTTP server stopped"')

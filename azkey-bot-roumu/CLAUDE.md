@@ -88,8 +88,16 @@ uv run ruff check --fix
 # Format code
 uv run ruff format
 
+# Check formatting (without modifying files)
+uv run ruff format --check
+
 # Check and fix everything
 uv run ruff check --fix && uv run ruff format
+```
+
+**IMPORTANT**: Always run both checks before committing:
+```bash
+uv run ruff check azkey_bot_roumu/ && uv run ruff format azkey_bot_roumu/ --check
 ```
 
 ## CI/CD
