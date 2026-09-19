@@ -67,12 +67,16 @@ Misskey のエンドポイント呼び出し、ポーリング、フォロワー
 ```sh
 gofmt -w .
 go vet ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 go test -race ./...
 go build ./...
 ```
 
-CI でも gofmt の確認、`go vet ./...`、`go build ./...`、`go test -race ./...`
-を実行します。旧 Docker イメージ公開 workflow と Python lint workflow は
+CI でも gofmt の確認、`go vet ./...`、Staticcheck、`go build ./...`、
+`go test -race ./...` を実行します。Staticcheck は Go 1.25 対応の
+2026.1（`v0.7.0`）に固定し、実行してもアプリの `go.mod` は変更しません。
+GitHub Actions の参照は完全なコミット SHA に固定しています。
+旧 Docker イメージ公開 workflow と Python lint workflow は
 削除し、現段階ではイメージ公開を行いません。
 
 ## 今後の範囲

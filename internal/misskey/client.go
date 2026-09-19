@@ -13,8 +13,8 @@ import (
 const requestTimeout = 30 * time.Second
 
 var (
-	errBaseURLInvalid = errors.New("Misskey base URL is invalid")
-	errTokenRequired  = errors.New("Misskey token is required")
+	errBaseURLInvalid = errors.New("misskey base URL is invalid")
+	errTokenRequired  = errors.New("misskey token is required")
 )
 
 // Client owns the HTTP transport settings and authentication material for

@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	errClientRequired  = errors.New("Misskey client is required")
+	errClientRequired  = errors.New("misskey client is required")
 	errContextRequired = errors.New("polling context is required")
 )
 
