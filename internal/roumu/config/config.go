@@ -1,4 +1,4 @@
-// Package config loads and validates process configuration.
+// Package config loads and validates azkey-roumu-bot process configuration.
 package config
 
 import (
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/azuki774/azkey-bot/internal/domain"
+	"github.com/azuki774/azkey-bot/internal/roumu/domain"
 )
 
 var (

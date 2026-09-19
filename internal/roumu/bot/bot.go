@@ -1,4 +1,4 @@
-// Package bot coordinates the application lifecycle.
+// Package bot coordinates the azkey-roumu-bot application lifecycle.
 package bot
 
 import (

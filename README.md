@@ -1,6 +1,7 @@
 # azkey-bot
 
-azkey.azuki.blue 用 bot の基盤です。現在は設定を読み込み、起動と停止の
+`azkey-bot` は複数の bot を収めるリポジトリです。現在は最初の bot である
+`azkey-roumu-bot` を一つのプロセスで動かし、設定の読み込みと起動・停止の
 ライフサイクルを確認するところまでを実装しています。
 
 ## 必要環境
@@ -14,7 +15,7 @@ azkey.azuki.blue 用 bot の基盤です。現在は設定を読み込み、起�
 ```sh
 export MISSKEY_BASE_URL='https://misskey.example.invalid'
 export MISSKEY_TOKEN='replace-with-a-local-token'
-export RULES_FILE='./rules.example.json'
+export RULES_FILE='./configs/azkey-roumu-bot/rules.example.json'
 ```
 
 `MISSKEY_BASE_URL`、`MISSKEY_TOKEN`、`RULES_FILE` はすべて必須です。未指定や
@@ -31,15 +32,15 @@ export RULES_FILE='./rules.example.json'
 }
 ```
 
-サンプルは `.env.example` と `rules.example.json` にあります。実際の
+サンプルは `.env.example` と `configs/azkey-roumu-bot/rules.example.json` にあります。実際の
 トークンやローカル設定はリポジトリへ保存しないでください。
 
 ## 起動・停止
 
 ```sh
 mkdir -p ./bin
-go build -o ./bin/azkey-bot ./cmd/azkey-bot
-./bin/azkey-bot
+go build -o ./bin/azkey-roumu-bot ./cmd/azkey-roumu-bot
+./bin/azkey-roumu-bot
 ```
 
 ビルドしたプロセスへ `Ctrl-C` または `SIGTERM` を送ると正常に停止します。
@@ -48,15 +49,29 @@ go build -o ./bin/azkey-bot ./cmd/azkey-bot
 
 ## 構成
 
-リポジトリは単一の Go モジュール（`github.com/azuki774/azkey-bot`）と、
-単一プロセスのコマンド（`cmd/azkey-bot`）で構成します。
+リポジトリは単一の Go モジュール（`github.com/azuki774/azkey-bot`）で、現在は
+一つの bot を一つのプロセスで実行します。共有の Misskey 境界と
+`azkey-roumu-bot` 固有の処理は次のように分かれています。
 
-- `internal/config`: 環境変数とルール JSON の読み込み・検証
-- `internal/domain`: 共有する最小限の業務値
-- `internal/misskey`: 認証情報を非公開で保持する HTTP クライアントの準備
-- `internal/polling`: キャンセル可能なポーリングのライフサイクル
-- `internal/bot`: ポーリングを受け取る実行ライフサイクル
-- `internal/repository/memory`: 将来の揮発性 `UserState` 保存領域の置き場所
+```
+.
+├── cmd/
+│   └── azkey-roumu-bot/             # azkey-roumu-bot のコマンド
+├── configs/
+│   └── azkey-roumu-bot/
+│       └── rules.example.json       # azkey-roumu-bot の設定例
+└── internal/
+    ├── misskey/                     # bot 間で共有する Misskey クライアント境界
+    └── roumu/                       # azkey-roumu-bot 固有の処理
+        ├── bot/                     # 実行ライフサイクル
+        ├── config/                  # 環境変数とルール JSON の読み込み・検証
+        ├── domain/                  # azkey-roumu-bot の業務値
+        ├── polling/                 # キャンセル可能なポーリングのライフサイクル
+        └── repository/memory/       # 揮発性 UserState 保存領域の置き場所
+```
+
+- `internal/misskey`: 認証情報を非公開で保持する共有 HTTP クライアントの準備
+- `internal/roumu`: `azkey-roumu-bot` に固有の設定、業務値、実行処理
 
 Misskey のエンドポイント呼び出し、ポーリング、フォロワー同期はまだなく、
 この基盤から外部通信は発生しません。メモリ保存領域のデータ構造と操作も
@@ -81,7 +96,15 @@ GitHub Actions の参照は完全なコミット SHA に固定しています。
 
 ## 今後の範囲
 
-- メモリリポジトリの `UserState`、`Get`、`Put` は issue #9 で定義します。
-- ルールの業務スキーマは issue #10 で定義します。
-- Misskey エンドポイントと認証付き操作は issue #11 で定義します。
-- ポーリングとフォロワー同期は issue #12、#13 で定義します。
+- ユーザー状態と repository は issue #9 で、型を `internal/roumu/domain`、
+  利用側 interface を `internal/roumu/bot`、保存実装を
+  `internal/roumu/repository/memory` に定義します。
+- ルールの業務スキーマは issue #10 で `internal/roumu/domain` に定義します。
+- Misskey エンドポイントと認証付き操作は issue #11 で共有の
+  `internal/misskey` に定義します。
+- ポーリングとフォロワー同期は issue #12、#13 で、取得・定期実行を
+  `internal/roumu/polling`、ユースケースを `internal/roumu/bot` に定義します。
+
+Issue #14 では、複数の bot を複数モジュールやプロセスオーケストレーションに
+分けずに収められるよう、これらの bot 固有のパスを `internal/roumu` 配下へ
+調整しました。

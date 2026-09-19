@@ -1,5 +1,5 @@
-// Package domain contains the small set of business values shared by the
-// application layers.
+// Package domain contains the small set of business values used by the
+// azkey-roumu-bot application layers.
 package domain
 
 // Rules represents the currently supported rules configuration.

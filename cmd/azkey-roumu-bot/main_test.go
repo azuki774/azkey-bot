@@ -36,10 +36,10 @@ func (c *logCapture) Write(data []byte) (int, error) {
 
 	_, _ = c.output.Write(data)
 	rendered := c.output.String()
-	if strings.Contains(rendered, `msg="azkey-bot started"`) {
+	if strings.Contains(rendered, `msg="azkey-roumu-bot started"`) {
 		c.startedOnce.Do(func() { close(c.started) })
 	}
-	if strings.Contains(rendered, `msg="azkey-bot stopped"`) {
+	if strings.Contains(rendered, `msg="azkey-roumu-bot stopped"`) {
 		c.stoppedOnce.Do(func() { close(c.stopped) })
 	}
 	return len(data), nil
@@ -207,7 +207,7 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 		t.Fatal("CLI returned success for invalid configuration")
 	}
 	invalidOutput := invalidCapture.String() + invalidStdout.String()
-	if strings.Contains(invalidOutput, invalidSecret) || strings.Contains(invalidOutput, "azkey-bot started") {
+	if strings.Contains(invalidOutput, invalidSecret) || strings.Contains(invalidOutput, "azkey-roumu-bot started") {
 		t.Fatalf("invalid-config output leaked data or startup log: %q", invalidOutput)
 	}
 }
@@ -218,7 +218,7 @@ func buildCLI(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("get working directory: %v", err)
 	}
-	binary := filepath.Join(t.TempDir(), "azkey-bot")
+	binary := filepath.Join(t.TempDir(), "azkey-roumu-bot")
 	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = workdir
 	output, err := build.CombinedOutput()

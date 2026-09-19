@@ -1,4 +1,4 @@
-// Command azkey-bot starts the azkey bot scaffold.
+// Command azkey-roumu-bot starts the azkey-roumu bot scaffold.
 package main
 
 import (
@@ -9,10 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/azuki774/azkey-bot/internal/bot"
-	"github.com/azuki774/azkey-bot/internal/config"
 	"github.com/azuki774/azkey-bot/internal/misskey"
-	"github.com/azuki774/azkey-bot/internal/polling"
+	"github.com/azuki774/azkey-bot/internal/roumu/bot"
+	"github.com/azuki774/azkey-bot/internal/roumu/config"
+	"github.com/azuki774/azkey-bot/internal/roumu/polling"
 )
 
 func main() {
@@ -27,7 +27,7 @@ func runMain() int {
 		Level: slog.LevelInfo,
 	}))
 	if err := run(ctx, os.Getenv, logger); err != nil {
-		logger.Error("azkey-bot stopped with an error", "error", err)
+		logger.Error("azkey-roumu-bot stopped with an error", "error", err)
 		return 1
 	}
 	return 0
@@ -61,13 +61,13 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) e
 	}
 
 	if logger != nil {
-		logger.Info("azkey-bot started")
+		logger.Info("azkey-roumu-bot started")
 	}
 	if err := runner.Run(ctx); err != nil {
 		return err
 	}
 	if logger != nil {
-		logger.Info("azkey-bot stopped")
+		logger.Info("azkey-roumu-bot stopped")
 	}
 	return nil
 }

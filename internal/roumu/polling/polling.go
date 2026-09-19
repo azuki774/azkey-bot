@@ -1,4 +1,4 @@
-// Package polling owns the cancellable polling lifecycle.
+// Package polling owns the cancellable azkey-roumu-bot polling lifecycle.
 package polling
 
 import (
