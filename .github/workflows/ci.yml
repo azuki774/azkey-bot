@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          files="$(gofmt -l .)"
+          if [[ -n "${files}" ]]; then
+            printf 'Files not formatted:\n%s\n' "${files}"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test with race detector
+        run: go test -race ./...

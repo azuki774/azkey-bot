@@ -1,13 +1,10 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Go build and test outputs
+/bin/
+*.test
+coverage.out
 
-# Virtual environments
-.venv
-
+# Local environment and secret-bearing settings
 .env
-roumu.csv
+.env.*
+!.env.example
+rules.local.json
