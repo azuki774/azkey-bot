@@ -67,8 +67,8 @@ docker run --rm \
 GitHub Actions は pull request ではイメージをビルドして起動・`SIGTERM` 停止を
 確認するだけで、レジストリへのログインや push は行いません。`master` への
 push では `ghcr.io/azuki774/azkey-bot-roumu:<コミット SHA 先頭 7 文字>` を公開し、
-`v1.2.3` のような有効な SemVer タグでは先頭の `v` を除いた
-`ghcr.io/azuki774/azkey-bot-roumu:1.2.3` を公開します。SemVer の build metadata
+`1.2.3` のような v なしの有効な SemVer タグでは、そのタグをそのまま使い
+`ghcr.io/azuki774/azkey-bot-roumu:1.2.3` を公開します。v 付きタグは公開対象外です。SemVer の build metadata
 （`+build` など）は Docker タグに使えないため受け付けず、`latest` や major/minor
 の別名タグも発行しません。
 

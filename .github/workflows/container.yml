@@ -6,7 +6,8 @@ on:
     branches:
       - master
     tags:
-      - 'v*'
+      # Validate SemVer in the verify job before publishing.
+      - '*'
 
 permissions: {}
 
@@ -59,8 +60,8 @@ jobs:
           echo 'publish=false' >> "${GITHUB_OUTPUT}"
           echo 'image_tag=' >> "${GITHUB_OUTPUT}"
 
-          # Match the v-prefixed release tags accepted by the old workflow.
-          semver_regex='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?$'
+          # Release tags use SemVer without a v prefix.
+          semver_regex='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?$'
 
           if [[ "${GITHUB_EVENT_NAME}" == 'push' && "${GITHUB_REF_TYPE}" == 'branch' && "${GITHUB_REF_NAME}" == 'master' ]]; then
             {
@@ -68,7 +69,7 @@ jobs:
               echo "image_tag=${GITHUB_SHA:0:7}"
             } >> "${GITHUB_OUTPUT}"
           elif [[ "${GITHUB_EVENT_NAME}" == 'push' && "${GITHUB_REF_TYPE}" == 'tag' && "${GITHUB_REF_NAME}" =~ ${semver_regex} ]]; then
-            image_tag="${GITHUB_REF_NAME#v}"
+            image_tag="${GITHUB_REF_NAME}"
             if (( ${#image_tag} <= 128 )); then
               {
                 echo 'publish=true'
