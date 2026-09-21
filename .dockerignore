@@ -1,0 +1,8 @@
+# Deny the context by default. The image only needs the Go module and source.
+*
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
