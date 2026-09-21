@@ -91,8 +91,7 @@ CI でも gofmt の確認、`go vet ./...`、Staticcheck、`go build ./...`、
 `go test -race ./...` を実行します。Staticcheck は Go 1.25 対応の
 2026.1（`v0.7.0`）に固定し、実行してもアプリの `go.mod` は変更しません。
 GitHub Actions の参照は完全なコミット SHA に固定しています。
-コンテナ workflow の publish job は、同じ workflow の Go の test、vet、build と
-コンテナのビルドが成功した場合だけ実行されます。
+Go の検証は通常 CI で行い、コンテナ workflow はタグ判定・イメージビルド・公開を担当します。
 
 ## 今後の範囲
 
