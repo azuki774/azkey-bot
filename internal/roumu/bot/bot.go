@@ -4,6 +4,8 @@ package bot
 import (
 	"context"
 	"errors"
+
+	"github.com/azuki774/azkey-bot/internal/domain"
 )
 
 var (
@@ -15,6 +17,17 @@ var (
 // loop.
 type Consumer interface {
 	Run(context.Context) error
+}
+
+// MisskeyClient is the small consumer-side view of the shared Misskey
+// client. It keeps HTTP DTOs and transport details out of roumu code.
+type MisskeyClient interface {
+	Self(context.Context) (domain.User, error)
+	ListFollowers(context.Context, string, domain.PageOptions) ([]domain.Following, error)
+	ListFollowing(context.Context, string, domain.PageOptions) ([]domain.Following, error)
+	ListUserNotes(context.Context, string, domain.PageOptions) ([]domain.Note, error)
+	CreateFollow(context.Context, string) (domain.User, error)
+	CreateReaction(context.Context, string, string) error
 }
 
 // Runner delegates lifecycle control to its consumer.

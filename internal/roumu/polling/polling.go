@@ -4,8 +4,9 @@ package polling
 import (
 	"context"
 	"errors"
+	"reflect"
 
-	"github.com/azuki774/azkey-bot/internal/misskey"
+	"github.com/azuki774/azkey-bot/internal/roumu/bot"
 )
 
 var (
@@ -16,15 +17,23 @@ var (
 // Poller is the lifecycle boundary for future polling work. It currently
 // waits for cancellation and performs no requests.
 type Poller struct {
-	client *misskey.Client
+	client bot.MisskeyClient
 }
 
 // New creates a poller bound to the configured Misskey client.
-func New(client *misskey.Client) (*Poller, error) {
-	if client == nil {
+func New(client bot.MisskeyClient) (*Poller, error) {
+	if nilMisskeyClient(client) {
 		return nil, errClientRequired
 	}
 	return &Poller{client: client}, nil
+}
+
+func nilMisskeyClient(client bot.MisskeyClient) bool {
+	if client == nil {
+		return true
+	}
+	value := reflect.ValueOf(client)
+	return value.Kind() == reflect.Pointer && value.IsNil()
 }
 
 // Run waits until ctx is canceled. Actual polling and endpoint calls are
