@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/azuki774/azkey-bot/internal/roumu/domain"
@@ -26,7 +28,29 @@ var (
 	errRulesFieldsMissing  = errors.New("RULES_FILE must contain version and rules")
 	errRulesVersion        = errors.New("RULES_FILE version is unsupported")
 	errRulesUnsupported    = errors.New("RULES_FILE contains unsupported rules")
+	errPollingMode         = errors.New("POLLING_MODE must be observe")
+	errPollingSetting      = errors.New("polling setting is invalid")
 )
+
+// PollingSettings is the validated process configuration passed to the
+// read-only polling lifecycle. The defaults are deliberately conservative
+// enough for about 100 followers while keeping ordinary observation latency
+// near one or two minutes.
+type PollingSettings struct {
+	Mode                 string
+	PollInterval         time.Duration
+	FollowerSyncInterval time.Duration
+	Concurrency          int
+	RatePerSecond        float64
+	RateBurst            int
+	PageLimit            int
+	MaxPagesPerTurn      int
+	DedupLimit           int
+	DedupTTL             time.Duration
+	StartupSpread        time.Duration
+	BackoffBase          time.Duration
+	BackoffMax           time.Duration
+}
 
 // Config contains the validated values needed to assemble the application.
 // Sensitive values are kept private and are exposed only to the constructor
@@ -35,6 +59,7 @@ type Config struct {
 	baseURL *url.URL
 	token   string
 	rules   domain.Rules
+	polling PollingSettings
 }
 
 // Load reads the process environment and the configured rules file.
@@ -68,7 +93,12 @@ func LoadFromEnv(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{baseURL: baseURL, token: token, rules: rules}, nil
+	polling, err := loadPollingSettings(getenv)
+	if err != nil {
+		return Config{}, err
+	}
+
+	return Config{baseURL: baseURL, token: token, rules: rules, polling: polling}, nil
 }
 
 // BaseURL returns a copy of the validated Misskey base URL.
@@ -88,6 +118,124 @@ func (c Config) Token() string {
 // Rules returns the validated rules configuration.
 func (c Config) Rules() domain.Rules {
 	return c.rules
+}
+
+// Polling returns the validated polling settings.
+func (c Config) Polling() PollingSettings {
+	return c.polling
+}
+
+func loadPollingSettings(getenv func(string) string) (PollingSettings, error) {
+	settings := PollingSettings{
+		Mode:                 "observe",
+		PollInterval:         time.Minute,
+		FollowerSyncInterval: 5 * time.Minute,
+		Concurrency:          2,
+		RatePerSecond:        2,
+		RateBurst:            1,
+		PageLimit:            100,
+		MaxPagesPerTurn:      5,
+		DedupLimit:           10_000,
+		DedupTTL:             24 * time.Hour,
+		StartupSpread:        time.Minute,
+		BackoffBase:          time.Second,
+		BackoffMax:           5 * time.Minute,
+	}
+
+	if value := strings.TrimSpace(getenv("POLLING_MODE")); value != "" {
+		settings.Mode = value
+	}
+	if settings.Mode != "observe" {
+		return PollingSettings{}, errPollingMode
+	}
+
+	var err error
+	if settings.PollInterval, err = parseDurationSetting(getenv, settings.PollInterval, "POLL_INTERVAL", "POLLING_INTERVAL"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.FollowerSyncInterval, err = parseDurationSetting(getenv, settings.FollowerSyncInterval, "FOLLOWER_SYNC_INTERVAL"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.Concurrency, err = parseIntSetting(getenv, settings.Concurrency, "POLL_CONCURRENCY", "POLLING_CONCURRENCY"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.RatePerSecond, err = parseFloatSetting(getenv, settings.RatePerSecond, "POLL_RATE_PER_SECOND"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.RateBurst, err = parseIntSetting(getenv, settings.RateBurst, "POLL_RATE_BURST"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.PageLimit, err = parseIntSetting(getenv, settings.PageLimit, "POLL_PAGE_LIMIT"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.MaxPagesPerTurn, err = parseIntSetting(getenv, settings.MaxPagesPerTurn, "POLL_MAX_PAGES_PER_TURN"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.DedupLimit, err = parseIntSetting(getenv, settings.DedupLimit, "POLL_DEDUP_LIMIT"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.DedupTTL, err = parseDurationSetting(getenv, settings.DedupTTL, "POLL_DEDUP_TTL"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.StartupSpread, err = parseDurationSetting(getenv, settings.StartupSpread, "POLL_STARTUP_SPREAD"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.BackoffBase, err = parseDurationSetting(getenv, settings.BackoffBase, "POLL_BACKOFF_BASE"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.BackoffMax, err = parseDurationSetting(getenv, settings.BackoffMax, "POLL_BACKOFF_MAX"); err != nil {
+		return PollingSettings{}, err
+	}
+
+	if settings.PollInterval <= 0 || settings.FollowerSyncInterval <= 0 || settings.Concurrency <= 0 || settings.Concurrency > 1_000 || settings.RatePerSecond <= 0 || settings.RateBurst <= 0 || settings.PageLimit <= 0 || settings.PageLimit > 100 || settings.MaxPagesPerTurn <= 0 || settings.MaxPagesPerTurn > 10_000 || settings.DedupLimit <= 0 || settings.DedupLimit > 1_000_000 || settings.DedupTTL <= 0 || settings.StartupSpread < 0 || settings.BackoffBase <= 0 || settings.BackoffMax < settings.BackoffBase {
+		return PollingSettings{}, errPollingSetting
+	}
+	return settings, nil
+}
+
+func parseDurationSetting(getenv func(string) string, fallback time.Duration, names ...string) (time.Duration, error) {
+	raw := settingValue(getenv, names...)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, errPollingSetting
+	}
+	return value, nil
+}
+
+func parseIntSetting(getenv func(string) string, fallback int, names ...string) (int, error) {
+	raw := settingValue(getenv, names...)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, errPollingSetting
+	}
+	return value, nil
+}
+
+func parseFloatSetting(getenv func(string) string, fallback float64, names ...string) (float64, error) {
+	raw := settingValue(getenv, names...)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, errPollingSetting
+	}
+	return value, nil
+}
+
+func settingValue(getenv func(string) string, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func parseBaseURL(raw string) (*url.URL, error) {

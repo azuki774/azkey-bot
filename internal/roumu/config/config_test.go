@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadFromEnvRequiresValues(t *testing.T) {
@@ -196,6 +197,92 @@ func TestLoadFromEnvMissingRulesFileDoesNotExposePath(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secretPath) || strings.Contains(err.Error(), env["MISSKEY_TOKEN"]) {
 		t.Fatalf("error contains sensitive input: %q", err)
+	}
+}
+
+func TestLoadFromEnvPollingDefaultsAndOverrides(t *testing.T) {
+	rulesPath := writeRulesFile(t, `{"version":1,"rules":[]}`)
+	base := map[string]string{
+		"MISSKEY_BASE_URL": "https://misskey.example.test",
+		"MISSKEY_TOKEN":    "polling-config-token",
+		"RULES_FILE":       rulesPath,
+	}
+	cfg, err := LoadFromEnv(mapLookup(base))
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+	defaults := cfg.Polling()
+	if defaults.Mode != "observe" || defaults.PollInterval != time.Minute || defaults.FollowerSyncInterval != 5*time.Minute || defaults.Concurrency != 2 || defaults.RatePerSecond != 2 || defaults.RateBurst != 1 || defaults.PageLimit != 100 || defaults.MaxPagesPerTurn != 5 || defaults.DedupLimit != 10_000 || defaults.DedupTTL != 24*time.Hour || defaults.StartupSpread != time.Minute || defaults.BackoffBase != time.Second || defaults.BackoffMax != 5*time.Minute {
+		t.Fatalf("polling defaults = %+v", defaults)
+	}
+
+	overrides := map[string]string{}
+	for key, value := range base {
+		overrides[key] = value
+	}
+	overrides["POLLING_MODE"] = "observe"
+	overrides["POLL_INTERVAL"] = "17s"
+	overrides["FOLLOWER_SYNC_INTERVAL"] = "19m"
+	overrides["POLL_CONCURRENCY"] = "4"
+	overrides["POLL_RATE_PER_SECOND"] = "3.5"
+	overrides["POLL_RATE_BURST"] = "2"
+	overrides["POLL_PAGE_LIMIT"] = "50"
+	overrides["POLL_MAX_PAGES_PER_TURN"] = "7"
+	overrides["POLL_DEDUP_LIMIT"] = "123"
+	overrides["POLL_DEDUP_TTL"] = "2h"
+	overrides["POLL_STARTUP_SPREAD"] = "3s"
+	overrides["POLL_BACKOFF_BASE"] = "2s"
+	overrides["POLL_BACKOFF_MAX"] = "1m"
+	cfg, err = LoadFromEnv(mapLookup(overrides))
+	if err != nil {
+		t.Fatalf("LoadFromEnv with overrides returned error: %v", err)
+	}
+	got := cfg.Polling()
+	if got.Mode != "observe" || got.PollInterval != 17*time.Second || got.FollowerSyncInterval != 19*time.Minute || got.Concurrency != 4 || got.RatePerSecond != 3.5 || got.RateBurst != 2 || got.PageLimit != 50 || got.MaxPagesPerTurn != 7 || got.DedupLimit != 123 || got.DedupTTL != 2*time.Hour || got.StartupSpread != 3*time.Second || got.BackoffBase != 2*time.Second || got.BackoffMax != time.Minute {
+		t.Fatalf("polling overrides = %+v", got)
+	}
+}
+
+func TestLoadFromEnvRejectsInvalidPollingSettings(t *testing.T) {
+	rulesPath := writeRulesFile(t, `{"version":1,"rules":[]}`)
+	base := map[string]string{
+		"MISSKEY_BASE_URL": "https://misskey.example.test",
+		"MISSKEY_TOKEN":    "polling-config-token",
+		"RULES_FILE":       rulesPath,
+	}
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "unsupported mode", key: "POLLING_MODE", value: "write"},
+		{name: "invalid duration", key: "POLL_INTERVAL", value: "soon"},
+		{name: "zero duration", key: "POLL_INTERVAL", value: "0s"},
+		{name: "negative concurrency", key: "POLL_CONCURRENCY", value: "-1"},
+		{name: "too many workers", key: "POLL_CONCURRENCY", value: "1001"},
+		{name: "invalid rate", key: "POLL_RATE_PER_SECOND", value: "not-a-number"},
+		{name: "not-a-number rate", key: "POLL_RATE_PER_SECOND", value: "NaN"},
+		{name: "positive infinite rate", key: "POLL_RATE_PER_SECOND", value: "+Inf"},
+		{name: "zero burst", key: "POLL_RATE_BURST", value: "0"},
+		{name: "page above API limit", key: "POLL_PAGE_LIMIT", value: "101"},
+		{name: "zero turn limit", key: "POLL_MAX_PAGES_PER_TURN", value: "0"},
+		{name: "dedup upper bound", key: "POLL_DEDUP_LIMIT", value: "1000001"},
+		{name: "negative startup spread", key: "POLL_STARTUP_SPREAD", value: "-1s"},
+		{name: "backoff order", key: "POLL_BACKOFF_MAX", value: "500ms"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			env := make(map[string]string, len(base)+1)
+			for key, value := range base {
+				env[key] = value
+			}
+			env[test.key] = test.value
+			if _, err := LoadFromEnv(mapLookup(env)); err == nil {
+				t.Fatalf("LoadFromEnv accepted %s=%q", test.key, test.value)
+			} else if strings.Contains(err.Error(), test.value) {
+				t.Fatalf("error exposes invalid setting value: %q", err)
+			}
+		})
 	}
 }
 

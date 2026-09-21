@@ -3,7 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +16,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/azuki774/azkey-bot/internal/domain"
+	"github.com/azuki774/azkey-bot/internal/roumu/polling"
 )
 
 type logCapture struct {
@@ -66,7 +73,9 @@ func TestRunStartsAndStopsOnContextCancellation(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		done <- run(ctx, mainMapLookup(env), logger)
+		done <- runWithClientFactory(ctx, mainMapLookup(env), logger, func(*url.URL, string) (polling.Client, error) {
+			return mainTestClient{}, nil
+		})
 	}()
 
 	select {
@@ -120,8 +129,20 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	binary := buildCLI(t)
 	secret := "cli-process-test-secret"
 	validRules := writeMainRules(t, `{"version":1,"rules":[]}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/i":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "bot-id", "username": "bot", "name": nil, "host": nil})
+		case "/api/users/followers":
+			_ = json.NewEncoder(w).Encode([]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
 	validEnv := map[string]string{
-		"MISSKEY_BASE_URL": "https://misskey.example.test",
+		"MISSKEY_BASE_URL": server.URL,
 		"MISSKEY_TOKEN":    secret,
 		"RULES_FILE":       validRules,
 	}
@@ -210,6 +231,20 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	if strings.Contains(invalidOutput, invalidSecret) || strings.Contains(invalidOutput, "azkey-roumu-bot started") {
 		t.Fatalf("invalid-config output leaked data or startup log: %q", invalidOutput)
 	}
+}
+
+type mainTestClient struct{}
+
+func (mainTestClient) Self(context.Context) (domain.User, error) {
+	return domain.User{ID: "bot-id", Username: "bot"}, nil
+}
+
+func (mainTestClient) ListFollowers(context.Context, string, domain.PageOptions) ([]domain.Following, error) {
+	return []domain.Following{}, nil
+}
+
+func (mainTestClient) ListUserNotes(context.Context, string, domain.NotePageOptions) ([]domain.Note, error) {
+	return []domain.Note{}, nil
 }
 
 func buildCLI(t *testing.T) string {

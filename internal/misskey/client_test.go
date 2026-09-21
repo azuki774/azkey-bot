@@ -170,7 +170,7 @@ func TestListUserNotesUsesSinceUntilAndPreservesNullableText(t *testing.T) {
 			t.Errorf("path = %q, want /api/users/notes", r.URL.Path)
 		}
 		body := decodeRequest(t, r)
-		if body["userId"] != "author-id" || body["sinceId"] != "note-since" || body["untilId"] != "note-until" || body["limit"] != float64(10) {
+		if body["userId"] != "author-id" || body["sinceId"] != "note-since" || body["untilId"] != "note-until" || body["limit"] != float64(10) || body["withReplies"] != true || body["withRenotes"] != true || body["withChannelNotes"] != false {
 			t.Errorf("notes body = %#v", body)
 		}
 		writeJSON(w, http.StatusOK, []map[string]any{{
@@ -187,8 +187,8 @@ func TestListUserNotesUsesSinceUntilAndPreservesNullableText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	notes, err := newTestClient(t, server, "notes-token").ListUserNotes(context.Background(), "author-id", domain.PageOptions{
-		Limit: 10, SinceID: "note-since", UntilID: "note-until",
+	notes, err := newTestClient(t, server, "notes-token").ListUserNotes(context.Background(), "author-id", domain.NotePageOptions{
+		Limit: 10, SinceID: "note-since", UntilID: "note-until", WithReplies: true, WithRenotes: true,
 	})
 	if err != nil {
 		t.Fatalf("ListUserNotes returned error: %v", err)
@@ -202,6 +202,33 @@ func TestListUserNotesUsesSinceUntilAndPreservesNullableText(t *testing.T) {
 	}
 	if note.User == nil || note.User.ID != "author-id" {
 		t.Fatalf("note user = %+v", note.User)
+	}
+}
+
+func TestListUserNotesEncodesEmptyBaselineDateAndExplicitFilters(t *testing.T) {
+	activation := time.Date(2026, 9, 21, 10, 0, 0, 123456789, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := decodeRequest(t, r)
+		if body["sinceDate"] != float64(activation.UnixMilli()) {
+			t.Errorf("sinceDate = %v, want milliseconds %d", body["sinceDate"], activation.UnixMilli())
+		}
+		for _, key := range []string{"sinceId", "untilId"} {
+			if _, ok := body[key]; ok {
+				t.Errorf("unexpected cursor %q in empty-baseline request", key)
+			}
+		}
+		if body["withReplies"] != true || body["withRenotes"] != true || body["withChannelNotes"] != false {
+			t.Errorf("unexpected note filters: %#v", body)
+		}
+		writeJSON(w, http.StatusOK, []any{})
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, "notes-test-token")
+	_, err := client.ListUserNotes(context.Background(), "author", domain.NotePageOptions{
+		Limit: 100, SinceDate: &activation, WithReplies: true, WithRenotes: true,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -231,7 +258,7 @@ func TestListEndpointsDistinguishNullEmptyAndMalformedResponses(t *testing.T) {
 			name: "notes",
 			path: "/api/users/notes",
 			call: func(client *Client) (bool, error) {
-				items, err := client.ListUserNotes(context.Background(), "target-user", domain.PageOptions{})
+				items, err := client.ListUserNotes(context.Background(), "target-user", domain.NotePageOptions{})
 				return items == nil, err
 			},
 		},
@@ -622,7 +649,7 @@ func TestInvalidLocalArgumentsDoNotMakeRequests(t *testing.T) {
 	if _, err := client.ListFollowers(context.Background(), "", domain.PageOptions{}); err == nil {
 		t.Fatal("empty user ID returned nil error")
 	}
-	if _, err := client.ListUserNotes(context.Background(), "author", domain.PageOptions{Limit: 101}); err == nil {
+	if _, err := client.ListUserNotes(context.Background(), "author", domain.NotePageOptions{Limit: 101}); err == nil {
 		t.Fatal("invalid limit returned nil error")
 	}
 	if err := client.CreateReaction(context.Background(), "", ":heart:"); err == nil {
