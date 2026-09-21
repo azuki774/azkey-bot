@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/azuki774/azkey-bot/internal/misskey"
 )
+
+var _ MisskeyClient = (*misskey.Client)(nil)
 
 type consumerFunc func(context.Context) error
 
