@@ -1,4 +1,6 @@
-// Package misskey provides the HTTP client boundary for Misskey.
+// Package misskey provides a small HTTP client for upstream Misskey 2026.9.0.
+// API behavior was checked against https://github.com/misskey-dev/misskey/tree/2026.9.0.
+// Methods make a single request without automatic retries or pagination.
 package misskey
 
 import (
@@ -91,6 +93,10 @@ func (c *Client) ListFollowing(ctx context.Context, userID string, options domai
 
 // ListUserNotes returns one page of notes authored by userID. SinceID and
 // UntilID are note IDs, as defined by users/notes.
+// It keeps server defaults: withReplies=false, withRenotes=true, and
+// withChannelNotes=false. The caller must select public notes. Server-side
+// filters mean a short page alone does not prove the cursor range is complete.
+// Results retain server order; the client does not sort them.
 func (c *Client) ListUserNotes(ctx context.Context, userID string, options domain.PageOptions) ([]domain.Note, error) {
 	if err := validateUserID(userID); err != nil {
 		return nil, err
@@ -130,6 +136,7 @@ func (c *Client) ListUserNotes(ctx context.Context, userID string, options domai
 }
 
 // CreateFollow follows userID and returns the followed user.
+// Success can mean a pending follow request, not an accepted follow.
 func (c *Client) CreateFollow(ctx context.Context, userID string) (domain.User, error) {
 	if err := validateUserID(userID); err != nil {
 		return domain.User{}, err
@@ -369,6 +376,7 @@ func httpResponseError(statusCode int, headers http.Header, body []byte) *domain
 }
 
 func parseRetryAfter(value string) *time.Duration {
+	// Misskey 2026.9.0 ApiCallService emits decimal seconds, not HTTP dates.
 	seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
 	const maxRetryAfterSeconds = int64((1<<63 - 1) / int64(time.Second))
 	if err != nil || seconds < 0 || seconds > maxRetryAfterSeconds {

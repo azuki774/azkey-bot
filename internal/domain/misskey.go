@@ -7,6 +7,8 @@ import "time"
 // leaves the endpoint default in effect. SinceID and UntilID are passed to
 // Misskey as-is; for relationship lists they are relationship IDs, not user
 // IDs.
+// Bounds are exclusive. SinceID alone returns ascending IDs; UntilID,
+// both cursors, or neither cursor returns descending IDs in the target version.
 type PageOptions struct {
 	Limit   int
 	SinceID string

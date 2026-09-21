@@ -45,8 +45,7 @@ go build -o ./bin/azkey-roumu-bot ./cmd/azkey-roumu-bot
 
 ビルドしたプロセスへ `Ctrl-C` または `SIGTERM` を送ると正常に停止します。
 現段階では空のルールを読み込んでも、実行中の poller は Misskey への通信を
-開始しません。HTTP クライアントの利用可能な範囲と対象バージョンの確認内容は
-[`docs/misskey-http.md`](docs/misskey-http.md) に記載しています。
+開始しません。HTTP クライアントは公式 Misskey `2026.9.0` を対象としています。
 
 ## 構成
 
@@ -77,7 +76,7 @@ go build -o ./bin/azkey-roumu-bot ./cmd/azkey-roumu-bot
 - `internal/roumu`: `azkey-roumu-bot` に固有の設定、業務値、実行処理
 
 Misskey クライアントは bot 自身、フォロワー・フォロー一覧、ユーザー投稿一覧、
-フォロー作成、リアクション作成を一ページ単位で提供します。ポーリング、
+フォロー作成、リアクション作成を提供します。一覧は一ページ単位の取得です。ポーリング、
 フォロワー同期、保存領域の操作はまだ実行しません。
 
 ## テスト
@@ -103,7 +102,7 @@ Go の検証は通常 CI で行い、コンテナ workflow はタグ判定・イ
   `internal/roumu/repository/memory` に定義します。
 - ルールの業務スキーマは issue #10 で `internal/roumu/domain` に定義します。
 - Misskey エンドポイントと認証付き操作は issue #11 として共有の
-  `internal/misskey` に実装済みです。対象範囲は `docs/misskey-http.md` を参照してください。
+  `internal/misskey` に実装済みです。自動再試行とリアクション削除は含みません。
 - ポーリングとフォロワー同期は issue #12、#13 で、取得・定期実行を
   `internal/roumu/polling`、ユースケースを `internal/roumu/bot` に定義します。
 
