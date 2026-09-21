@@ -1,0 +1,102 @@
+name: Build and publish container
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+    tags:
+      # Validate SemVer in the verify job before publishing.
+      - '*'
+
+permissions: {}
+
+env:
+  IMAGE_NAME: ghcr.io/azuki774/azkey-bot-roumu
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.tag.outputs.publish }}
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Select publish tag
+        id: tag
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo 'publish=false' >> "${GITHUB_OUTPUT}"
+          echo 'image_tag=' >> "${GITHUB_OUTPUT}"
+
+          # Release tags use SemVer without a v prefix.
+          semver_regex='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?$'
+
+          if [[ "${GITHUB_EVENT_NAME}" == 'push' && "${GITHUB_REF_TYPE}" == 'branch' && "${GITHUB_REF_NAME}" == 'master' ]]; then
+            {
+              echo 'publish=true'
+              echo "image_tag=${GITHUB_SHA:0:7}"
+            } >> "${GITHUB_OUTPUT}"
+          elif [[ "${GITHUB_EVENT_NAME}" == 'push' && "${GITHUB_REF_TYPE}" == 'tag' && "${GITHUB_REF_NAME}" =~ ${semver_regex} ]]; then
+            image_tag="${GITHUB_REF_NAME}"
+            if (( ${#image_tag} <= 128 )); then
+              {
+                echo 'publish=true'
+                echo "image_tag=${image_tag}"
+              } >> "${GITHUB_OUTPUT}"
+            else
+              echo "Not publishing ${GITHUB_REF_NAME}: image tag exceeds 128 characters." >&2
+            fi
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build container image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          tags: azkey-bot-roumu:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish:
+    if: github.event_name == 'push' && needs.verify.outputs.publish == 'true'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build and push image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.verify.outputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
