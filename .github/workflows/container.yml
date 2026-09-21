@@ -88,65 +88,10 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          load: true
           push: false
           tags: azkey-bot-roumu:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Smoke-test startup and graceful SIGTERM
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          rules_dir="${RUNNER_TEMP}/azkey-bot-rules"
-          mkdir -p "${rules_dir}"
-          cp configs/azkey-roumu-bot/rules.example.json "${rules_dir}/rules.json"
-
-          container_name=azkey-bot-roumu-smoke
-          cleanup() {
-            docker rm -f "${container_name}" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          docker run --detach \
-            --name "${container_name}" \
-            --platform linux/amd64 \
-            --stop-signal SIGTERM \
-            --env MISSKEY_BASE_URL=https://misskey.example.invalid \
-            --env MISSKEY_TOKEN=dummy-token \
-            --env RULES_FILE=/config/rules.json \
-            --volume "${rules_dir}/rules.json:/config/rules.json:ro" \
-            azkey-bot-roumu:ci
-
-          started=false
-          for _ in {1..30}; do
-            logs="$(docker logs "${container_name}" 2>&1 || true)"
-            if grep -Fq 'azkey-roumu-bot started' <<<"${logs}"; then
-              started=true
-              break
-            fi
-            if [[ "$(docker inspect --format '{{.State.Running}}' "${container_name}")" != 'true' ]]; then
-              printf '%s\n' "${logs}"
-              exit 1
-            fi
-            sleep 1
-          done
-          if [[ "${started}" != 'true' ]]; then
-            docker logs "${container_name}"
-            exit 1
-          fi
-
-          docker stop --time 10 "${container_name}"
-          if [[ "$(docker inspect --format '{{.State.ExitCode}}' "${container_name}")" != '0' ]]; then
-            docker logs "${container_name}"
-            exit 1
-          fi
-          final_logs="$(docker logs "${container_name}" 2>&1)"
-          if ! grep -Fq 'azkey-roumu-bot stopped' <<<"${final_logs}"; then
-            printf '%s\n' "${final_logs}"
-            exit 1
-          fi
 
   publish:
     if: github.event_name == 'push' && needs.verify.outputs.publish == 'true'

@@ -47,31 +47,6 @@ go build -o ./bin/azkey-roumu-bot ./cmd/azkey-roumu-bot
 現段階では空のルールを読み込んでも Misskey への通信や認証確認などの外部
 操作は行いません。
 
-## Docker
-
-Docker イメージは Alpine ベースの実行環境に静的にビルドした
-`azkey-roumu-bot` と CA 証明書を配置し、root ではないユーザーで起動します。
-トークンやルールファイルはイメージへ埋め込まず、起動時に環境変数と
-読み取り専用の外部マウントで渡してください。
-
-```sh
-docker build -t ghcr.io/azuki774/azkey-bot-roumu:local .
-docker run --rm \
-  --env MISSKEY_BASE_URL='https://misskey.example.invalid' \
-  --env MISSKEY_TOKEN \
-  --env RULES_FILE=/config/rules.json \
-  --volume "$PWD/configs/azkey-roumu-bot/rules.example.json:/config/rules.json:ro" \
-  ghcr.io/azuki774/azkey-bot-roumu:local
-```
-
-GitHub Actions は pull request ではイメージをビルドして起動・`SIGTERM` 停止を
-確認するだけで、レジストリへのログインや push は行いません。`master` への
-push では `ghcr.io/azuki774/azkey-bot-roumu:<コミット SHA 先頭 7 文字>` を公開し、
-`1.2.3` のような v なしの有効な SemVer タグでは、そのタグをそのまま使い
-`ghcr.io/azuki774/azkey-bot-roumu:1.2.3` を公開します。v 付きタグは公開対象外です。SemVer の build metadata
-（`+build` など）は Docker タグに使えないため受け付けず、`latest` や major/minor
-の別名タグも発行しません。
-
 ## 構成
 
 リポジトリは単一の Go モジュール（`github.com/azuki774/azkey-bot`）で、現在は
@@ -117,7 +92,7 @@ CI でも gofmt の確認、`go vet ./...`、Staticcheck、`go build ./...`、
 2026.1（`v0.7.0`）に固定し、実行してもアプリの `go.mod` は変更しません。
 GitHub Actions の参照は完全なコミット SHA に固定しています。
 コンテナ workflow の publish job は、同じ workflow の Go の test、vet、build と
-コンテナの smoke test が成功した場合だけ実行されます。
+コンテナのビルドが成功した場合だけ実行されます。
 
 ## 今後の範囲
 
