@@ -7,4 +7,3 @@ coverage.out
 .env
 .env.*
 !.env.example
-rules.local.json

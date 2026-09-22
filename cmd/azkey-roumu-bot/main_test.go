@@ -58,13 +58,11 @@ func (c *logCapture) String() string {
 	return c.output.String()
 }
 
-func TestRunStartsAndStopsOnContextCancellation(t *testing.T) {
-	rulesPath := writeMainRules(t, `{"version":1,"rules":[]}`)
+func TestRunStartsAndStopsOnContextCancellationWithEnvironmentOnlyConfig(t *testing.T) {
 	secret := "run-lifecycle-test-secret"
 	env := map[string]string{
 		"MISSKEY_BASE_URL": "https://misskey.example.test",
 		"MISSKEY_TOKEN":    secret,
-		"RULES_FILE":       rulesPath,
 	}
 	capture := newLogCapture()
 	logger := slog.New(slog.NewTextHandler(capture, nil))
@@ -110,7 +108,7 @@ func TestRunRejectsInvalidConfigBeforeStartup(t *testing.T) {
 	env := map[string]string{
 		"MISSKEY_BASE_URL": "https://misskey.example.test",
 		"MISSKEY_TOKEN":    secret,
-		"RULES_FILE":       writeMainRules(t, `{"version":1,"rules":[{"secret":"invalid-config-test-secret"}]}`),
+		"POLL_INTERVAL":    "not-a-duration",
 	}
 	capture := newLogCapture()
 	err := run(context.Background(), mainMapLookup(env), slog.New(slog.NewTextHandler(capture, nil)))
@@ -128,7 +126,6 @@ func TestRunRejectsInvalidConfigBeforeStartup(t *testing.T) {
 func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	binary := buildCLI(t)
 	secret := "cli-process-test-secret"
-	validRules := writeMainRules(t, `{"version":1,"rules":[]}`)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -146,7 +143,6 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	validEnv := map[string]string{
 		"MISSKEY_BASE_URL": server.URL,
 		"MISSKEY_TOKEN":    secret,
-		"RULES_FILE":       validRules,
 	}
 
 	cmd := exec.Command(binary)
@@ -212,7 +208,7 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	invalidEnv := map[string]string{
 		"MISSKEY_BASE_URL": "https://misskey.example.test",
 		"MISSKEY_TOKEN":    invalidSecret,
-		"RULES_FILE":       writeMainRules(t, `{"version":1,"rules":[{"secret":"cli-invalid-config-secret"}]}`),
+		"POLL_INTERVAL":    "not-a-duration",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -267,15 +263,6 @@ func buildCLI(t *testing.T) string {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
 	return binary
-}
-
-func writeMainRules(t *testing.T, content string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "rules.json")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write rules file: %v", err)
-	}
-	return path
 }
 
 func mainMapLookup(values map[string]string) func(string) string {

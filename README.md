@@ -39,17 +39,15 @@ Go 1.25 以降が必要です。HTTP クライアントは公式 Misskey `2026.9
 ```sh
 export MISSKEY_BASE_URL='https://misskey.example.invalid'
 export MISSKEY_TOKEN='replace-with-a-local-token'
-export RULES_FILE='./configs/azkey-roumu-bot/rules.example.json'
 export POLLING_MODE='observe'
 
 go run ./cmd/azkey-roumu-bot
 ```
 
-`MISSKEY_BASE_URL`、`MISSKEY_TOKEN`、`RULES_FILE` は必須です。
+`MISSKEY_BASE_URL` と `MISSKEY_TOKEN` のみ必須です。設定は環境変数だけから読み込み、設定ファイルのマウントは不要です。
 `.env` は自動では読み込みません。実際のトークンやローカル設定はリポジトリへ保存しないでください。
 停止は `Ctrl-C` または `SIGTERM` で行います。
 
-反応ルールは未実装のため、ルールファイルには上記のサンプル（`version: 1`、空の `rules`）を使ってください。
 `POLLING_MODE` は未指定でも `observe` になり、他の値は受け付けません。
 
 確認間隔は `POLL_INTERVAL`（既定 `1m`）、相互フォローの同期間隔は

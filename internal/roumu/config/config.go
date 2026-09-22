@@ -2,10 +2,7 @@
 package config
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
 	"math"
 	"net/url"
 	"os"
@@ -13,23 +10,15 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"github.com/azuki774/azkey-bot/internal/roumu/domain"
 )
 
 var (
-	errEnvironmentLookup   = errors.New("environment lookup is required")
-	errBaseURLRequired     = errors.New("MISSKEY_BASE_URL is required")
-	errBaseURLInvalid      = errors.New("MISSKEY_BASE_URL must be an absolute HTTP or HTTPS URL without userinfo, query, or fragment")
-	errTokenRequired       = errors.New("MISSKEY_TOKEN is required")
-	errRulesFileRequired   = errors.New("RULES_FILE is required")
-	errRulesFileUnreadable = errors.New("RULES_FILE could not be read")
-	errRulesJSONInvalid    = errors.New("RULES_FILE contains invalid JSON")
-	errRulesFieldsMissing  = errors.New("RULES_FILE must contain version and rules")
-	errRulesVersion        = errors.New("RULES_FILE version is unsupported")
-	errRulesUnsupported    = errors.New("RULES_FILE contains unsupported rules")
-	errPollingMode         = errors.New("POLLING_MODE must be observe")
-	errPollingSetting      = errors.New("polling setting is invalid")
+	errEnvironmentLookup = errors.New("environment lookup is required")
+	errBaseURLRequired   = errors.New("MISSKEY_BASE_URL is required")
+	errBaseURLInvalid    = errors.New("MISSKEY_BASE_URL must be an absolute HTTP or HTTPS URL without userinfo, query, or fragment")
+	errTokenRequired     = errors.New("MISSKEY_TOKEN is required")
+	errPollingMode       = errors.New("POLLING_MODE must be observe")
+	errPollingSetting    = errors.New("polling setting is invalid")
 )
 
 // PollingSettings is the validated process configuration passed to the
@@ -58,11 +47,10 @@ type PollingSettings struct {
 type Config struct {
 	baseURL *url.URL
 	token   string
-	rules   domain.Rules
 	polling PollingSettings
 }
 
-// Load reads the process environment and the configured rules file.
+// Load reads the process environment.
 func Load() (Config, error) {
 	return LoadFromEnv(os.Getenv)
 }
@@ -84,21 +72,12 @@ func LoadFromEnv(getenv func(string) string) (Config, error) {
 		return Config{}, errTokenRequired
 	}
 
-	rulesPath := getenv("RULES_FILE")
-	if strings.TrimSpace(rulesPath) == "" {
-		return Config{}, errRulesFileRequired
-	}
-	rules, err := loadRules(rulesPath)
-	if err != nil {
-		return Config{}, err
-	}
-
 	polling, err := loadPollingSettings(getenv)
 	if err != nil {
 		return Config{}, err
 	}
 
-	return Config{baseURL: baseURL, token: token, rules: rules, polling: polling}, nil
+	return Config{baseURL: baseURL, token: token, polling: polling}, nil
 }
 
 // BaseURL returns a copy of the validated Misskey base URL.
@@ -113,11 +92,6 @@ func (c Config) BaseURL() *url.URL {
 // Token returns the validated token for HTTP client construction.
 func (c Config) Token() string {
 	return c.token
-}
-
-// Rules returns the validated rules configuration.
-func (c Config) Rules() domain.Rules {
-	return c.rules
 }
 
 // Polling returns the validated polling settings.
@@ -277,100 +251,4 @@ func containsURLWhitespace(raw string) bool {
 		}
 	}
 	return false
-}
-
-type rulesDocument struct {
-	Version *int               `json:"version"`
-	Rules   *[]json.RawMessage `json:"rules"`
-}
-
-func loadRules(path string) (domain.Rules, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return domain.Rules{}, errRulesFileUnreadable
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	if err := scanJSONValue(decoder, true); err != nil {
-		return domain.Rules{}, errRulesJSONInvalid
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return domain.Rules{}, errRulesJSONInvalid
-	}
-
-	var document rulesDocument
-	if err := json.Unmarshal(data, &document); err != nil {
-		return domain.Rules{}, errRulesJSONInvalid
-	}
-
-	if document.Version == nil || document.Rules == nil {
-		return domain.Rules{}, errRulesFieldsMissing
-	}
-	if *document.Version != 1 {
-		return domain.Rules{}, errRulesVersion
-	}
-	if len(*document.Rules) != 0 {
-		return domain.Rules{}, errRulesUnsupported
-	}
-
-	return domain.Rules{}, nil
-}
-
-func scanJSONValue(decoder *json.Decoder, topLevel bool) error {
-	token, err := decoder.Token()
-	if err != nil {
-		return errRulesJSONInvalid
-	}
-
-	delimiter, isDelimiter := token.(json.Delim)
-	if !isDelimiter {
-		if topLevel {
-			return errRulesJSONInvalid
-		}
-		return nil
-	}
-
-	switch delimiter {
-	case '{':
-		keys := make(map[string]struct{})
-		for decoder.More() {
-			keyToken, err := decoder.Token()
-			if err != nil {
-				return errRulesJSONInvalid
-			}
-			key, ok := keyToken.(string)
-			if !ok {
-				return errRulesJSONInvalid
-			}
-			if _, exists := keys[key]; exists {
-				return errRulesJSONInvalid
-			}
-			keys[key] = struct{}{}
-			if topLevel && key != "version" && key != "rules" {
-				return errRulesJSONInvalid
-			}
-			if err := scanJSONValue(decoder, false); err != nil {
-				return err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil || end != json.Delim('}') {
-			return errRulesJSONInvalid
-		}
-		return nil
-	case '[':
-		for decoder.More() {
-			if err := scanJSONValue(decoder, false); err != nil {
-				return err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil || end != json.Delim(']') {
-			return errRulesJSONInvalid
-		}
-		return nil
-	default:
-		return errRulesJSONInvalid
-	}
 }
