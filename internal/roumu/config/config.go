@@ -34,7 +34,7 @@ var (
 
 // PollingSettings is the validated process configuration passed to the
 // read-only polling lifecycle. The defaults are deliberately conservative
-// enough for about 100 followers while keeping ordinary observation latency
+// enough for about 100 mutual targets while keeping ordinary observation latency
 // near one or two minutes.
 type PollingSettings struct {
 	Mode                 string

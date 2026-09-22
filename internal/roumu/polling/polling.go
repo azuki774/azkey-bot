@@ -1,7 +1,7 @@
 // Package polling owns the cancellable azkey-roumu-bot polling lifecycle.
 //
-// Polling is deliberately read-only. It acquires follower relationships and
-// notes, then hands eligible notes to a NoteHandler. The handler is the
+// Polling is deliberately read-only. It acquires mutual follow relationships
+// and notes, then hands eligible notes to a NoteHandler. The handler is the
 // boundary for business processing; this package never creates follows or
 // reactions.
 package polling
@@ -23,14 +23,14 @@ import (
 )
 
 var (
-	errClientRequired         = errors.New("misskey client is required")
-	errHandlerRequired        = errors.New("note handler is required")
-	errContextRequired        = errors.New("polling context is required")
-	errAlreadyRunning         = errors.New("poller is already running")
-	errInvalidResponse        = errors.New("polling response is invalid")
-	errStuckCursor            = errors.New("polling cursor did not advance")
-	errFollowerSyncIncomplete = errors.New("follower pagination did not complete")
-	errTargetGone             = errors.New("polling target is no longer a follower")
+	errClientRequired             = errors.New("misskey client is required")
+	errHandlerRequired            = errors.New("note handler is required")
+	errContextRequired            = errors.New("polling context is required")
+	errAlreadyRunning             = errors.New("poller is already running")
+	errInvalidResponse            = errors.New("polling response is invalid")
+	errStuckCursor                = errors.New("polling cursor did not advance")
+	errRelationshipSyncIncomplete = errors.New("relationship pagination did not complete")
+	errTargetGone                 = errors.New("polling target is no longer mutual")
 )
 
 const (
@@ -46,7 +46,7 @@ const (
 	defaultStartupSpread        = time.Minute
 	defaultBackoffBase          = time.Second
 	defaultBackoffMax           = 5 * time.Minute
-	maxFollowerPages            = 10_000
+	maxRelationshipPages        = 10_000
 	maxConcurrency              = 1_000
 	maxPagesPerTurn             = 10_000
 	maxDedupLimit               = 1_000_000
@@ -57,9 +57,9 @@ const (
 // production intervals.
 type SleepFunc func(context.Context, time.Duration) error
 
-// RateLimiter is shared by self, follower, and note requests. SetCooldown is
-// used for a server-provided rate-limit window so all request classes observe
-// the same cooldown.
+// RateLimiter is shared by self, relationship, and note requests. SetCooldown
+// is used for a server-provided rate-limit window so all request classes
+// observe the same cooldown.
 type RateLimiter interface {
 	Wait(context.Context) error
 	SetCooldown(time.Time)
@@ -93,7 +93,7 @@ type Settings struct {
 }
 
 // DefaultSettings returns the approved production defaults: up to 100
-// followers, a usual one-to-two minute observation latency, two concurrent
+// mutual targets, a usual one-to-two minute observation latency, two concurrent
 // workers, and two read requests per second with a burst of one.
 func DefaultSettings() Settings {
 	return Settings{
@@ -188,7 +188,7 @@ func WithTimingHooks(clock func() time.Time, sleep SleepFunc, jitter func(time.D
 	}
 }
 
-// NoteHandler receives eligible follower notes. A nil error means either the
+// NoteHandler receives eligible target notes. A nil error means either the
 // note was processed or intentionally ignored. A non-nil error leaves the
 // cursor at the last successful note, so the failed note is retried later.
 type NoteHandler interface {
@@ -216,7 +216,7 @@ func (h ObservationHandler) HandleNote(ctx context.Context, note domain.Note) er
 		return err
 	}
 	if h.Logger != nil {
-		h.Logger.Info("observed follower note", "note_id", note.ID, "user_id", note.UserID)
+		h.Logger.Info("observed target note", "note_id", note.ID, "user_id", note.UserID)
 	}
 	return nil
 }
@@ -226,10 +226,11 @@ func (h ObservationHandler) HandleNote(ctx context.Context, note domain.Note) er
 type Client interface {
 	Self(context.Context) (domain.User, error)
 	ListFollowers(context.Context, string, domain.PageOptions) ([]domain.Following, error)
+	ListFollowing(context.Context, string, domain.PageOptions) ([]domain.Following, error)
 	ListUserNotes(context.Context, string, domain.NotePageOptions) ([]domain.Note, error)
 }
 
-// Poller owns volatile follower and note cursor state. State is intentionally
+// Poller owns volatile target and note cursor state. State is intentionally
 // memory-only; restarting the process re-establishes baselines instead of
 // attempting to infer notes missed while it was down.
 type Poller struct {
@@ -331,10 +332,10 @@ func nilHandler(handler NoteHandler) bool {
 	return (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface || value.Kind() == reflect.Map || value.Kind() == reflect.Func || value.Kind() == reflect.Slice) && value.IsNil()
 }
 
-// Run initializes the authenticated user, synchronizes the complete follower
-// snapshot, and then schedules serialized per-user note workers until ctx is
-// canceled. Authentication failures terminate the lifecycle; transient read
-// failures preserve the previous snapshot and are retried with backoff.
+// Run initializes the authenticated user, synchronizes the complete mutual
+// target snapshot, and then schedules serialized per-user note workers until
+// ctx is canceled. Authentication failures terminate the lifecycle; transient
+// read failures preserve the previous snapshot and are retried with backoff.
 func (p *Poller) Run(ctx context.Context) error {
 	if p == nil || nilClient(p.client) {
 		return errClientRequired
@@ -393,7 +394,7 @@ func (p *Poller) Run(ctx context.Context) error {
 	p.stateMu.Unlock()
 
 	now := p.now()
-	_, syncErr := p.fetchAndApplyFollowers(ctx, now)
+	_, syncErr := p.fetchAndApplyTargets(ctx, now)
 	if isContextError(syncErr, ctx) {
 		return nil
 	}
@@ -405,7 +406,7 @@ func (p *Poller) Run(ctx context.Context) error {
 	if syncErr != nil {
 		syncBackoff = p.nextBackoff(syncBackoff)
 		nextSync = now.Add(p.retryDelay(syncErr, syncBackoff))
-		p.logReadError("initial follower sync", "", syncErr)
+		p.logReadError("initial target sync", "", syncErr)
 	}
 
 	workerCount := p.settings.Concurrency
@@ -486,7 +487,7 @@ func (p *Poller) Run(ctx context.Context) error {
 					if result.err != nil {
 						syncBackoff = p.nextBackoff(syncBackoff)
 						nextSync = now.Add(p.retryDelay(result.err, syncBackoff))
-						p.logReadError("follower sync", "", result.err)
+						p.logReadError("target sync", "", result.err)
 					} else {
 						syncBackoff = 0
 						nextSync = now.Add(p.settings.FollowerSyncInterval)
@@ -549,7 +550,7 @@ func (p *Poller) worker(ctx context.Context, jobs <-chan pollJob, results chan<-
 		result := pollResult{kind: job.kind, target: job.target}
 		switch job.kind {
 		case pollJobSync:
-			_, result.err = p.fetchAndApplyFollowers(ctx, p.now())
+			_, result.err = p.fetchAndApplyTargets(ctx, p.now())
 		case pollJobTarget:
 			result.err = p.processTarget(ctx, job.target)
 		}
@@ -653,11 +654,11 @@ func (p *Poller) completeTargetJob(target *targetState, err error, now time.Time
 				delay = p.withJitter(delay)
 			}
 			target.nextAt = now.Add(delay)
-			p.logReadError("follower notes", target.id, err)
+			p.logReadError("target notes", target.id, err)
 		} else {
 			target.backoff = 0
 			target.nextAt = now.Add(p.settings.PollInterval)
-			p.logReadError("follower notes", target.id, err)
+			p.logReadError("target notes", target.id, err)
 		}
 	}
 	p.stateMu.Unlock()
@@ -673,16 +674,39 @@ func (p *Poller) fetchSelf(ctx context.Context) (domain.User, error) {
 	return user, err
 }
 
-func (p *Poller) fetchAndApplyFollowers(ctx context.Context, now time.Time) ([]string, error) {
-	followers, err := p.fetchFollowers(ctx)
+type relationshipDirection uint8
+
+const (
+	inboundRelationships relationshipDirection = iota + 1
+	outboundRelationships
+)
+
+func (p *Poller) fetchAndApplyTargets(ctx context.Context, now time.Time) ([]string, error) {
+	inbound, err := p.fetchRelationshipIDs(ctx, inboundRelationships)
 	if err != nil {
 		return nil, err
 	}
-	p.applyFollowerSnapshot(followers, now)
-	return followers, nil
+	outbound, err := p.fetchRelationshipIDs(ctx, outboundRelationships)
+	if err != nil {
+		return nil, err
+	}
+
+	outboundSet := make(map[string]struct{}, len(outbound))
+	for _, id := range outbound {
+		outboundSet[id] = struct{}{}
+	}
+	mutual := make([]string, 0, len(inbound))
+	for _, id := range inbound {
+		if _, present := outboundSet[id]; present {
+			mutual = append(mutual, id)
+		}
+	}
+	sort.Strings(mutual)
+	p.applyTargetSnapshot(mutual, now)
+	return mutual, nil
 }
 
-func (p *Poller) fetchFollowers(ctx context.Context) ([]string, error) {
+func (p *Poller) fetchRelationshipIDs(ctx context.Context, direction relationshipDirection) ([]string, error) {
 	p.stateMu.Lock()
 	selfID := p.selfID
 	p.stateMu.Unlock()
@@ -690,15 +714,25 @@ func (p *Poller) fetchFollowers(ctx context.Context) ([]string, error) {
 		return nil, errInvalidResponse
 	}
 
+	var list func(context.Context, string, domain.PageOptions) ([]domain.Following, error)
+	switch direction {
+	case inboundRelationships:
+		list = p.client.ListFollowers
+	case outboundRelationships:
+		list = p.client.ListFollowing
+	default:
+		return nil, errInvalidResponse
+	}
+
 	ids := make(map[string]struct{})
 	untilID := ""
-	seenRelationshipIDs := make(map[string]struct{})
-	for page := 0; page < maxFollowerPages; page++ {
+	seenRelationships := make(map[string]domain.Following)
+	for page := 0; page < maxRelationshipPages; page++ {
 		options := domain.PageOptions{Limit: p.settings.PageLimit, UntilID: untilID}
 		var relationships []domain.Following
 		err := p.read(ctx, func(ctx context.Context) error {
 			var err error
-			relationships, err = p.client.ListFollowers(ctx, selfID, options)
+			relationships, err = list(ctx, selfID, options)
 			return err
 		})
 		if err != nil {
@@ -718,10 +752,7 @@ func (p *Poller) fetchFollowers(ctx context.Context) ([]string, error) {
 
 		previousID := ""
 		for _, relationship := range relationships {
-			if !validID(relationship.ID) || !validID(relationship.FollowerID) || relationship.FolloweeID != selfID {
-				return nil, errInvalidResponse
-			}
-			if relationship.Follower != nil && relationship.Follower.ID != relationship.FollowerID {
+			if !validRelationship(relationship, selfID, direction) {
 				return nil, errInvalidResponse
 			}
 			if previousID != "" && strings.Compare(relationship.ID, previousID) > 0 {
@@ -731,27 +762,55 @@ func (p *Poller) fetchFollowers(ctx context.Context) ([]string, error) {
 				return nil, errInvalidResponse
 			}
 			previousID = relationship.ID
-			if relationship.FollowerID == selfID {
+			previous, seen := seenRelationships[relationship.ID]
+			if seen && (previous.FollowerID != relationship.FollowerID || previous.FolloweeID != relationship.FolloweeID) {
+				return nil, errInvalidResponse
+			}
+			if !seen {
+				seenRelationships[relationship.ID] = relationship
+			}
+			candidateID := relationship.FollowerID
+			if direction == outboundRelationships {
+				candidateID = relationship.FolloweeID
+			}
+			if candidateID == selfID || seen {
 				continue
 			}
-			if _, seen := seenRelationshipIDs[relationship.ID]; !seen {
-				seenRelationshipIDs[relationship.ID] = struct{}{}
-				ids[relationship.FollowerID] = struct{}{}
-			}
+			ids[candidateID] = struct{}{}
 		}
 
 		nextUntilID := relationships[len(relationships)-1].ID
 		if !validID(nextUntilID) || (untilID != "" && strings.Compare(nextUntilID, untilID) >= 0) {
-			return nil, errFollowerSyncIncomplete
+			return nil, errRelationshipSyncIncomplete
 		}
 		untilID = nextUntilID
 	}
-	return nil, errFollowerSyncIncomplete
+	return nil, errRelationshipSyncIncomplete
 }
 
-func (p *Poller) applyFollowerSnapshot(followerIDs []string, now time.Time) {
-	newIDs := make(map[string]struct{}, len(followerIDs))
-	for _, id := range followerIDs {
+func validRelationship(relationship domain.Following, selfID string, direction relationshipDirection) bool {
+	if !validID(relationship.ID) || !validID(relationship.FollowerID) || !validID(relationship.FolloweeID) {
+		return false
+	}
+	if relationship.Follower != nil && (!validID(relationship.Follower.ID) || relationship.Follower.ID != relationship.FollowerID) {
+		return false
+	}
+	if relationship.Followee != nil && (!validID(relationship.Followee.ID) || relationship.Followee.ID != relationship.FolloweeID) {
+		return false
+	}
+	switch direction {
+	case inboundRelationships:
+		return relationship.FolloweeID == selfID
+	case outboundRelationships:
+		return relationship.FollowerID == selfID
+	default:
+		return false
+	}
+}
+
+func (p *Poller) applyTargetSnapshot(targetIDs []string, now time.Time) {
+	newIDs := make(map[string]struct{}, len(targetIDs))
+	for _, id := range targetIDs {
 		if validID(id) && id != p.selfIdentifier() {
 			newIDs[id] = struct{}{}
 		}
@@ -1075,7 +1134,7 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, errStuckCursor) || errors.Is(err, errInvalidResponse) || errors.Is(err, errFollowerSyncIncomplete) {
+	if errors.Is(err, errStuckCursor) || errors.Is(err, errInvalidResponse) || errors.Is(err, errRelationshipSyncIncomplete) {
 		return false
 	}
 	if apiErr, ok := asDomainError(err); ok {

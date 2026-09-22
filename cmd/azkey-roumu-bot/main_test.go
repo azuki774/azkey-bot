@@ -136,6 +136,8 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "bot-id", "username": "bot", "name": nil, "host": nil})
 		case "/api/users/followers":
 			_ = json.NewEncoder(w).Encode([]any{})
+		case "/api/users/following":
+			_ = json.NewEncoder(w).Encode([]any{})
 		default:
 			http.NotFound(w, r)
 		}
@@ -240,6 +242,10 @@ func (mainTestClient) Self(context.Context) (domain.User, error) {
 }
 
 func (mainTestClient) ListFollowers(context.Context, string, domain.PageOptions) ([]domain.Following, error) {
+	return []domain.Following{}, nil
+}
+
+func (mainTestClient) ListFollowing(context.Context, string, domain.PageOptions) ([]domain.Following, error) {
 	return []domain.Following{}, nil
 }
 

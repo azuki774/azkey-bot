@@ -1,4 +1,4 @@
-// Command azkey-roumu-bot observes public follower notes through read-only polling.
+// Command azkey-roumu-bot observes public notes from mutual targets through read-only polling.
 package main
 
 import (
