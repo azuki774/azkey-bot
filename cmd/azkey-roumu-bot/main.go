@@ -1,10 +1,11 @@
-// Command azkey-roumu-bot starts the azkey-roumu bot scaffold.
+// Command azkey-roumu-bot observes public notes from mutual targets through read-only polling.
 package main
 
 import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -38,8 +39,19 @@ func runMain() int {
 // environment lookup so the lifecycle can be tested without sending signals
 // or changing the process environment.
 func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) error {
+	return runWithClientFactory(ctx, getenv, logger, func(baseURL *url.URL, token string) (polling.Client, error) {
+		return misskey.NewClient(baseURL, token)
+	})
+}
+
+type clientFactory func(*url.URL, string) (polling.Client, error)
+
+func runWithClientFactory(ctx context.Context, getenv func(string) string, logger *slog.Logger, makeClient clientFactory) error {
 	if ctx == nil {
 		return errors.New("application context is required")
+	}
+	if makeClient == nil {
+		return errors.New("misskey client factory is required")
 	}
 
 	cfg, err := config.LoadFromEnv(getenv)
@@ -47,11 +59,25 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) e
 		return err
 	}
 
-	client, err := misskey.NewClient(cfg.BaseURL(), cfg.Token())
+	client, err := makeClient(cfg.BaseURL(), cfg.Token())
 	if err != nil {
 		return err
 	}
-	poller, err := polling.New(client)
+	settings := polling.DefaultSettings()
+	configured := cfg.Polling()
+	settings.PollInterval = configured.PollInterval
+	settings.FollowerSyncInterval = configured.FollowerSyncInterval
+	settings.Concurrency = configured.Concurrency
+	settings.RatePerSecond = configured.RatePerSecond
+	settings.RateBurst = configured.RateBurst
+	settings.PageLimit = configured.PageLimit
+	settings.MaxPagesPerTurn = configured.MaxPagesPerTurn
+	settings.DedupLimit = configured.DedupLimit
+	settings.DedupTTL = configured.DedupTTL
+	settings.StartupSpread = configured.StartupSpread
+	settings.BackoffBase = configured.BackoffBase
+	settings.BackoffMax = configured.BackoffMax
+	poller, err := polling.New(client, polling.ObservationHandler{Logger: logger}, polling.WithSettings(settings), polling.WithLogger(logger))
 	if err != nil {
 		return err
 	}
@@ -61,7 +87,7 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) e
 	}
 
 	if logger != nil {
-		logger.Info("azkey-roumu-bot started")
+		logger.Info("azkey-roumu-bot started", "polling_mode", configured.Mode)
 	}
 	if err := runner.Run(ctx); err != nil {
 		return err

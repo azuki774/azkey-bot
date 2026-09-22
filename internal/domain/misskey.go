@@ -15,6 +15,20 @@ type PageOptions struct {
 	UntilID string
 }
 
+// NotePageOptions selects one page from users/notes. Note-specific filters are
+// kept separate from relationship pagination because Misskey exposes a
+// different set of options for notes. SinceDate is encoded by the HTTP client
+// as Unix milliseconds when it is present.
+type NotePageOptions struct {
+	Limit            int
+	SinceID          string
+	UntilID          string
+	SinceDate        *time.Time
+	WithReplies      bool
+	WithRenotes      bool
+	WithChannelNotes bool
+}
+
 // User is the small user projection used by the bot.
 type User struct {
 	ID       string

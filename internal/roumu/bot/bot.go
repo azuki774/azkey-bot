@@ -25,7 +25,7 @@ type MisskeyClient interface {
 	Self(context.Context) (domain.User, error)
 	ListFollowers(context.Context, string, domain.PageOptions) ([]domain.Following, error)
 	ListFollowing(context.Context, string, domain.PageOptions) ([]domain.Following, error)
-	ListUserNotes(context.Context, string, domain.PageOptions) ([]domain.Note, error)
+	ListUserNotes(context.Context, string, domain.NotePageOptions) ([]domain.Note, error)
 	CreateFollow(context.Context, string) (domain.User, error)
 	CreateReaction(context.Context, string, string) error
 }

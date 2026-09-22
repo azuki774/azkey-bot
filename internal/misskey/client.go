@@ -92,25 +92,30 @@ func (c *Client) ListFollowing(ctx context.Context, userID string, options domai
 }
 
 // ListUserNotes returns one page of notes authored by userID. SinceID and
-// UntilID are note IDs, as defined by users/notes.
-// It keeps server defaults: withReplies=false, withRenotes=true, and
-// withChannelNotes=false. The caller must select public notes. Server-side
-// filters mean a short page alone does not prove the cursor range is complete.
-// Results retain server order; the client does not sort them.
-func (c *Client) ListUserNotes(ctx context.Context, userID string, options domain.PageOptions) ([]domain.Note, error) {
+// UntilID are note IDs, as defined by users/notes. Note filters are sent
+// explicitly so the caller can choose the business policy for renotes while
+// replies are included and channel notes are excluded by the polling layer.
+// The caller must select public notes. Server-side filters mean a short page
+// alone does not prove the cursor range is complete. Results retain server
+// order; the client does not sort them.
+func (c *Client) ListUserNotes(ctx context.Context, userID string, options domain.NotePageOptions) ([]domain.Note, error) {
 	if err := validateUserID(userID); err != nil {
 		return nil, err
 	}
-	if err := validatePageOptions(options); err != nil {
+	if err := validateNotePageOptions(options); err != nil {
 		return nil, err
 	}
 
-	body, err := c.post(ctx, "users/notes", pageRequest{
-		I:       cToken(c),
-		UserID:  userID,
-		Limit:   options.Limit,
-		SinceID: options.SinceID,
-		UntilID: options.UntilID,
+	body, err := c.post(ctx, "users/notes", notePageRequest{
+		I:                cToken(c),
+		UserID:           userID,
+		Limit:            options.Limit,
+		SinceID:          options.SinceID,
+		UntilID:          options.UntilID,
+		SinceDate:        sinceDateMillis(options.SinceDate),
+		WithReplies:      options.WithReplies,
+		WithRenotes:      options.WithRenotes,
+		WithChannelNotes: options.WithChannelNotes,
 	})
 	if err != nil {
 		return nil, err
@@ -292,6 +297,24 @@ func validatePageOptions(options domain.PageOptions) error {
 		return invalidArgumentError()
 	}
 	return nil
+}
+
+func validateNotePageOptions(options domain.NotePageOptions) error {
+	if options.Limit < 0 || options.Limit > 100 {
+		return invalidArgumentError()
+	}
+	if options.SinceDate != nil && options.SinceDate.IsZero() {
+		return invalidArgumentError()
+	}
+	return nil
+}
+
+func sinceDateMillis(value *time.Time) *int64 {
+	if value == nil {
+		return nil
+	}
+	millis := value.UnixMilli()
+	return &millis
 }
 
 func decodeJSON(body []byte, target any) error {

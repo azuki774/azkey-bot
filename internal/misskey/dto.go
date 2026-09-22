@@ -21,6 +21,18 @@ type pageRequest struct {
 	UntilID string `json:"untilId,omitempty"`
 }
 
+type notePageRequest struct {
+	I                string `json:"i"`
+	UserID           string `json:"userId"`
+	Limit            int    `json:"limit,omitempty"`
+	SinceID          string `json:"sinceId,omitempty"`
+	UntilID          string `json:"untilId,omitempty"`
+	SinceDate        *int64 `json:"sinceDate,omitempty"`
+	WithReplies      bool   `json:"withReplies"`
+	WithRenotes      bool   `json:"withRenotes"`
+	WithChannelNotes bool   `json:"withChannelNotes"`
+}
+
 type followRequest struct {
 	I      string `json:"i"`
 	UserID string `json:"userId"`
