@@ -1485,6 +1485,176 @@ func TestObservationHandlerDoesNotExposeNoteText(t *testing.T) {
 	}
 }
 
+func TestFetchSummarySeparatesSuccessFailureIdleAndCancellation(t *testing.T) {
+	summary := newFetchSummary()
+	summary.begin(fetchOperationSelf)
+	summary.finish(fetchOperationSelf, nil, context.Background())
+	summary.begin(fetchOperationRelationshipSync)
+	summary.finish(fetchOperationRelationshipSync, errTestAPI, context.Background())
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	summary.begin(fetchOperationTargetNotes)
+	summary.finish(fetchOperationTargetNotes, context.Canceled, canceled)
+	summary.begin(fetchOperationTargetNotes)
+	summary.finish(fetchOperationTargetNotes, errTargetGone, context.Background())
+
+	snapshot := summary.take()
+	if snapshot.outcome() != "partial_failure" || snapshot.attempts() != 2 || snapshot.failures() != 1 || snapshot.inFlight() != 0 {
+		t.Fatalf("summary outcome=%q attempts=%d failures=%d in-flight=%d", snapshot.outcome(), snapshot.attempts(), snapshot.failures(), snapshot.inFlight())
+	}
+	if got := snapshot.operations[fetchOperationSelf]; got.attempts() != 1 || got.successes != 1 || got.failures != 0 {
+		t.Fatalf("self counts = %+v", got)
+	}
+	if got := snapshot.operations[fetchOperationRelationshipSync]; got.attempts() != 1 || got.successes != 0 || got.failures != 1 {
+		t.Fatalf("relationship counts = %+v", got)
+	}
+	if got := snapshot.operations[fetchOperationTargetNotes]; got.attempts() != 0 || got.inFlight != 0 {
+		t.Fatalf("canceled/removed target counts = %+v", got)
+	}
+	if got := summary.take(); got.outcome() != "idle" || got.attempts() != 0 {
+		t.Fatalf("empty next window outcome=%q attempts=%d, want idle", got.outcome(), got.attempts())
+	}
+}
+
+func TestFetchSummaryReportsInFlightInsteadOfFalseSuccess(t *testing.T) {
+	summary := newFetchSummary()
+	summary.begin(fetchOperationTargetNotes)
+	snapshot := summary.take()
+	if snapshot.outcome() != "in_progress" || snapshot.attempts() != 0 || snapshot.inFlight() != 1 {
+		t.Fatalf("in-progress summary outcome=%q attempts=%d in-flight=%d", snapshot.outcome(), snapshot.attempts(), snapshot.inFlight())
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	summary.finish(fetchOperationTargetNotes, context.Canceled, canceled)
+	if got := summary.take(); got.outcome() != "idle" || got.inFlight() != 0 {
+		t.Fatalf("canceled window outcome=%q in-flight=%d, want idle and no failures", got.outcome(), got.inFlight())
+	}
+}
+
+func TestTargetNoteTurnCountsMultiplePagesOnce(t *testing.T) {
+	client := &fakeClient{
+		self: domain.User{ID: "bot"},
+		notes: func(_ string, options domain.NotePageOptions) ([]domain.Note, error) {
+			switch options.SinceID {
+			case "n0":
+				return []domain.Note{testNote("n1", "follower", "public", testNow)}, nil
+			case "n1":
+				return []domain.Note{testNote("n2", "follower", "public", testNow)}, nil
+			case "n2":
+				return []domain.Note{}, nil
+			default:
+				return nil, errors.New("unexpected cursor")
+			}
+		},
+	}
+	poller := newTestPoller(t, client, nil)
+	target := addTarget(t, poller, "follower")
+	target.initialized = true
+	target.cursor = "n0"
+	summary := newFetchSummary()
+
+	if err := poller.runTargetTurn(context.Background(), target, summary); err != nil {
+		t.Fatalf("runTargetTurn returned error: %v", err)
+	}
+	if got := client.noteCallCount(); got != 3 {
+		t.Fatalf("note page requests = %d, want 3", got)
+	}
+	counts := summary.take().operations[fetchOperationTargetNotes]
+	if counts.attempts() != 1 || counts.successes != 1 || counts.failures != 0 {
+		t.Fatalf("target turn counts = %+v, want one successful turn", counts)
+	}
+}
+
+func TestRelationshipSyncCountsCompletePaginatedAttemptOnce(t *testing.T) {
+	client := &fakeClient{self: domain.User{ID: "bot"}}
+	client.followers = func(_ string, options domain.PageOptions) ([]domain.Following, error) {
+		if options.UntilID == "" {
+			return []domain.Following{testFollowing("r2", "f2", "bot"), testFollowing("r1", "f1", "bot")}, nil
+		}
+		return []domain.Following{}, nil
+	}
+	client.following = func(_ string, options domain.PageOptions) ([]domain.Following, error) {
+		if options.UntilID == "" {
+			return []domain.Following{testFollowing("o2", "bot", "f2"), testFollowing("o1", "bot", "f1")}, nil
+		}
+		return []domain.Following{}, nil
+	}
+	poller := newTestPoller(t, client, nil)
+	poller.stateMu.Lock()
+	poller.selfID = "bot"
+	poller.stateMu.Unlock()
+	summary := newFetchSummary()
+
+	if _, err := poller.syncTargets(context.Background(), testNow, summary); err != nil {
+		t.Fatalf("syncTargets returned error: %v", err)
+	}
+	counts := summary.take().operations[fetchOperationRelationshipSync]
+	if counts.attempts() != 1 || counts.successes != 1 || counts.failures != 0 {
+		t.Fatalf("relationship sync counts = %+v, want one successful sync", counts)
+	}
+}
+
+func TestFetchSummaryLoggingUsesDebugLevelAndIncludesIdleOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		level     slog.Level
+		wantEvent bool
+	}{
+		{name: "info suppresses", level: slog.LevelInfo},
+		{name: "debug emits", level: slog.LevelDebug, wantEvent: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var lines []string
+			logger := slog.New(slog.NewTextHandler(&lineWriter{lines: &lines}, &slog.HandlerOptions{Level: test.level}))
+			poller := &Poller{logger: logger, settings: DefaultSettings()}
+			poller.logFetchSummary(fetchSummarySnapshot{}, false)
+			if (len(lines) != 0) != test.wantEvent {
+				t.Fatalf("summary lines = %q, want event=%t", lines, test.wantEvent)
+			}
+			if test.wantEvent && (!strings.Contains(lines[0], "outcome=idle") || !strings.Contains(lines[0], "attempts=0") || strings.Contains(lines[0], "target_id")) {
+				t.Fatalf("debug summary = %q", lines[0])
+			}
+		})
+	}
+}
+
+func TestRunSummaryFlushesFatalFailureAndIsLifecycleScoped(t *testing.T) {
+	authErr := domain.NewError(domain.ErrorKindAuth, 401, "UNAUTHORIZED", nil)
+	client := &fakeClient{
+		self:       domain.User{ID: "bot"},
+		selfErrors: []error{authErr},
+	}
+	var lines []string
+	logger := slog.New(slog.NewTextHandler(&lineWriter{lines: &lines}, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	poller := newTestPoller(t, client, nil)
+	poller.logger = logger
+
+	if err := poller.Run(context.Background()); !errors.Is(err, authErr) {
+		t.Fatalf("first Run error = %v, want %v", err, authErr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	poller.settings.Sleep = func(context.Context, time.Duration) error {
+		cancel()
+		return context.Canceled
+	}
+	if err := poller.Run(ctx); err != nil {
+		t.Fatalf("second Run error = %v", err)
+	}
+	cancel()
+
+	if len(lines) != 2 {
+		t.Fatalf("summary lines = %q, want one final summary per lifecycle", lines)
+	}
+	if !strings.Contains(lines[0], "outcome=failure") || !strings.Contains(lines[0], "self_attempts=1") || !strings.Contains(lines[0], "self_failures=1") {
+		t.Fatalf("fatal lifecycle summary = %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "outcome=success") || !strings.Contains(lines[1], "self_attempts=1") || !strings.Contains(lines[1], "self_successes=1") || !strings.Contains(lines[1], "relationship_sync_attempts=1") || !strings.Contains(lines[1], "relationship_sync_successes=1") || strings.Contains(lines[1], "self_failures=1") {
+		t.Fatalf("restarted lifecycle summary = %q", lines[1])
+	}
+}
+
 type fakeClient struct {
 	mu         sync.Mutex
 	self       domain.User

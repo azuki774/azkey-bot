@@ -24,9 +24,17 @@ func runMain() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	logLevel, levelErr := config.ParseLogLevel(os.Getenv("LOG_LEVEL"))
+	if levelErr != nil {
+		logLevel = slog.LevelInfo
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: logLevel,
 	}))
+	if levelErr != nil {
+		logger.Error("azkey-roumu-bot stopped with an error", "error", levelErr)
+		return 1
+	}
 	if err := run(ctx, os.Getenv, logger); err != nil {
 		logger.Error("azkey-roumu-bot stopped with an error", "error", err)
 		return 1

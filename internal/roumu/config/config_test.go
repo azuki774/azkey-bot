@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,38 @@ func TestLoadFromEnvPollingDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestParseLogLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  slog.Level
+	}{
+		{name: "default", value: "", want: slog.LevelInfo},
+		{name: "debug", value: "DEBUG", want: slog.LevelDebug},
+		{name: "info", value: " info ", want: slog.LevelInfo},
+		{name: "warn", value: "WARN", want: slog.LevelWarn},
+		{name: "error", value: "ERROR", want: slog.LevelError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ParseLogLevel(test.value)
+			if err != nil {
+				t.Fatalf("ParseLogLevel returned error: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("ParseLogLevel(%q) = %v, want %v", test.value, got, test.want)
+			}
+		})
+	}
+
+	const invalid = "debug-with-private-value"
+	if _, err := ParseLogLevel(invalid); err == nil {
+		t.Fatal("ParseLogLevel accepted an unsupported level")
+	} else if strings.Contains(err.Error(), invalid) {
+		t.Fatalf("error exposed the environment value: %q", err)
+	}
+}
+
 func TestLoadFromEnvRejectsInvalidPollingSettings(t *testing.T) {
 	base := map[string]string{
 		"MISSKEY_BASE_URL": "https://misskey.example.test",
@@ -155,6 +188,7 @@ func TestLoadFromEnvRejectsInvalidPollingSettings(t *testing.T) {
 		value string
 	}{
 		{name: "unsupported mode", key: "POLLING_MODE", value: "write"},
+		{name: "invalid log level", key: "LOG_LEVEL", value: "debug-with-private-value"},
 		{name: "invalid duration", key: "POLL_INTERVAL", value: "soon"},
 		{name: "zero duration", key: "POLL_INTERVAL", value: "0s"},
 		{name: "negative concurrency", key: "POLL_CONCURRENCY", value: "-1"},

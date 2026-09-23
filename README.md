@@ -49,6 +49,9 @@ go run ./cmd/azkey-roumu-bot
 停止は `Ctrl-C` または `SIGTERM` で行います。
 
 `POLLING_MODE` は未指定でも `observe` になり、他の値は受け付けません。
+`LOG_LEVEL` は既定で `INFO` です。`DEBUG` にすると、取得処理の結果を種類別に集計したログが
+`POLL_INTERVAL` ごとに出力されます。集計対象はその時間内に完了した処理で、`success` / `partial_failure` / `failure` で結果を確認できます。
+完了した処理がない場合は、実行中なら `in_progress`、実行中の処理もなければ `idle` になります。停止時は未出力の結果があれば追加で出力します。
 
 確認間隔は `POLL_INTERVAL`（既定 `1m`）、相互フォローの同期間隔は
 `FOLLOWER_SYNC_INTERVAL`（既定 `5m`）で変更できます。
