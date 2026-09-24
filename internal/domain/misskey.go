@@ -48,6 +48,18 @@ type Following struct {
 	Followee   *User
 }
 
+// Relation is the authenticated user's relationship state for another user.
+// The HTTP boundary rejects responses where any required flag is absent, so
+// false values here are always explicit server observations.
+type Relation struct {
+	ID                             string
+	IsFollowing                    bool
+	IsFollowed                     bool
+	HasPendingFollowRequestFromYou bool
+	IsBlocking                     bool
+	IsBlocked                      bool
+}
+
 // Note is the small note projection needed by the bot. Text and CW are
 // nullable in Misskey responses, including for notes such as pure renotes.
 type Note struct {

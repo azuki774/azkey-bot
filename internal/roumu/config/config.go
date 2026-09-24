@@ -28,19 +28,21 @@ var (
 // enough for about 100 mutual targets while keeping ordinary observation latency
 // near one or two minutes.
 type PollingSettings struct {
-	Mode                 string
-	PollInterval         time.Duration
-	FollowerSyncInterval time.Duration
-	Concurrency          int
-	RatePerSecond        float64
-	RateBurst            int
-	PageLimit            int
-	MaxPagesPerTurn      int
-	DedupLimit           int
-	DedupTTL             time.Duration
-	StartupSpread        time.Duration
-	BackoffBase          time.Duration
-	BackoffMax           time.Duration
+	Mode                   string
+	PollInterval           time.Duration
+	FollowerSyncInterval   time.Duration
+	FollowWriteInterval    time.Duration
+	FollowMaxWritesPerSync int
+	Concurrency            int
+	RatePerSecond          float64
+	RateBurst              int
+	PageLimit              int
+	MaxPagesPerTurn        int
+	DedupLimit             int
+	DedupTTL               time.Duration
+	StartupSpread          time.Duration
+	BackoffBase            time.Duration
+	BackoffMax             time.Duration
 }
 
 // Config contains the validated values needed to assemble the application.
@@ -123,19 +125,21 @@ func (c Config) Polling() PollingSettings {
 
 func loadPollingSettings(getenv func(string) string) (PollingSettings, error) {
 	settings := PollingSettings{
-		Mode:                 "observe",
-		PollInterval:         time.Minute,
-		FollowerSyncInterval: 5 * time.Minute,
-		Concurrency:          2,
-		RatePerSecond:        2,
-		RateBurst:            1,
-		PageLimit:            100,
-		MaxPagesPerTurn:      5,
-		DedupLimit:           10_000,
-		DedupTTL:             24 * time.Hour,
-		StartupSpread:        time.Minute,
-		BackoffBase:          time.Second,
-		BackoffMax:           5 * time.Minute,
+		Mode:                   "observe",
+		PollInterval:           time.Minute,
+		FollowerSyncInterval:   10 * time.Minute,
+		FollowWriteInterval:    time.Minute,
+		FollowMaxWritesPerSync: 10,
+		Concurrency:            2,
+		RatePerSecond:          2,
+		RateBurst:              1,
+		PageLimit:              100,
+		MaxPagesPerTurn:        5,
+		DedupLimit:             10_000,
+		DedupTTL:               24 * time.Hour,
+		StartupSpread:          time.Minute,
+		BackoffBase:            time.Second,
+		BackoffMax:             5 * time.Minute,
 	}
 
 	if value := strings.TrimSpace(getenv("POLLING_MODE")); value != "" {
@@ -150,6 +154,12 @@ func loadPollingSettings(getenv func(string) string) (PollingSettings, error) {
 		return PollingSettings{}, err
 	}
 	if settings.FollowerSyncInterval, err = parseDurationSetting(getenv, settings.FollowerSyncInterval, "FOLLOWER_SYNC_INTERVAL"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.FollowWriteInterval, err = parseDurationSetting(getenv, settings.FollowWriteInterval, "FOLLOW_WRITE_INTERVAL"); err != nil {
+		return PollingSettings{}, err
+	}
+	if settings.FollowMaxWritesPerSync, err = parseIntSetting(getenv, settings.FollowMaxWritesPerSync, "FOLLOW_MAX_WRITES_PER_SYNC"); err != nil {
 		return PollingSettings{}, err
 	}
 	if settings.Concurrency, err = parseIntSetting(getenv, settings.Concurrency, "POLL_CONCURRENCY", "POLLING_CONCURRENCY"); err != nil {
@@ -183,7 +193,7 @@ func loadPollingSettings(getenv func(string) string) (PollingSettings, error) {
 		return PollingSettings{}, err
 	}
 
-	if settings.PollInterval <= 0 || settings.FollowerSyncInterval <= 0 || settings.Concurrency <= 0 || settings.Concurrency > 1_000 || settings.RatePerSecond <= 0 || settings.RateBurst <= 0 || settings.PageLimit <= 0 || settings.PageLimit > 100 || settings.MaxPagesPerTurn <= 0 || settings.MaxPagesPerTurn > 10_000 || settings.DedupLimit <= 0 || settings.DedupLimit > 1_000_000 || settings.DedupTTL <= 0 || settings.StartupSpread < 0 || settings.BackoffBase <= 0 || settings.BackoffMax < settings.BackoffBase {
+	if settings.PollInterval <= 0 || settings.FollowerSyncInterval <= 0 || settings.FollowWriteInterval <= 0 || settings.FollowMaxWritesPerSync <= 0 || settings.FollowMaxWritesPerSync > 10 || settings.Concurrency <= 0 || settings.Concurrency > 1_000 || settings.RatePerSecond <= 0 || settings.RateBurst <= 0 || settings.PageLimit <= 0 || settings.PageLimit > 100 || settings.MaxPagesPerTurn <= 0 || settings.MaxPagesPerTurn > 10_000 || settings.DedupLimit <= 0 || settings.DedupLimit > 1_000_000 || settings.DedupTTL <= 0 || settings.StartupSpread < 0 || settings.BackoffBase <= 0 || settings.BackoffMax < settings.BackoffBase {
 		return PollingSettings{}, errPollingSetting
 	}
 	return settings, nil

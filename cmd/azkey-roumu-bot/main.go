@@ -85,6 +85,25 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 	settings.StartupSpread = configured.StartupSpread
 	settings.BackoffBase = configured.BackoffBase
 	settings.BackoffMax = configured.BackoffMax
+	limiter, err := polling.NewRateLimiter(settings.RatePerSecond, settings.RateBurst)
+	if err != nil {
+		return err
+	}
+	settings.RateLimiter = limiter
+	followClient, ok := client.(bot.FollowClient)
+	if !ok {
+		return errors.New("misskey client does not support follower synchronization")
+	}
+	followSyncSettings := bot.DefaultFollowSyncSettings()
+	followSyncSettings.MaxWritesPerSync = configured.FollowMaxWritesPerSync
+	followSyncSettings.WriteInterval = configured.FollowWriteInterval
+	followSyncSettings.BackoffBase = configured.BackoffBase
+	followSyncSettings.BackoffMax = configured.BackoffMax
+	followSynchronizer, err := bot.NewFollowerSynchronizer(followClient, limiter, followSyncSettings, logger)
+	if err != nil {
+		return err
+	}
+	settings.FollowerSynchronizer = followSynchronizer
 	poller, err := polling.New(client, polling.ObservationHandler{Logger: logger}, polling.WithSettings(settings), polling.WithLogger(logger))
 	if err != nil {
 		return err
