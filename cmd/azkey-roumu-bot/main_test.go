@@ -26,14 +26,17 @@ type logCapture struct {
 	output      bytes.Buffer
 	started     chan struct{}
 	stopped     chan struct{}
+	summary     chan struct{}
 	startedOnce sync.Once
 	stoppedOnce sync.Once
+	summaryOnce sync.Once
 }
 
 func newLogCapture() *logCapture {
 	return &logCapture{
 		started: make(chan struct{}),
 		stopped: make(chan struct{}),
+		summary: make(chan struct{}),
 	}
 }
 
@@ -48,6 +51,10 @@ func (c *logCapture) Write(data []byte) (int, error) {
 	}
 	if strings.Contains(rendered, `msg="azkey-roumu-bot stopped"`) {
 		c.stoppedOnce.Do(func() { close(c.stopped) })
+	}
+	// Initial reads may finish in different summary windows.
+	if strings.Contains(rendered, `msg="polling fetch summary"`) && strings.Contains(rendered, "relationship_sync_successes=1") {
+		c.summaryOnce.Do(func() { close(c.summary) })
 	}
 	return len(data), nil
 }
@@ -143,6 +150,8 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	validEnv := map[string]string{
 		"MISSKEY_BASE_URL": server.URL,
 		"MISSKEY_TOKEN":    secret,
+		"LOG_LEVEL":        "DEBUG",
+		"POLL_INTERVAL":    "10ms",
 	}
 
 	cmd := exec.Command(binary)
@@ -176,6 +185,11 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("CLI did not report startup")
 	}
+	select {
+	case <-capture.summary:
+	case <-time.After(5 * time.Second):
+		t.Fatal("CLI did not emit a debug polling summary")
+	}
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("send SIGTERM: %v", err)
@@ -202,6 +216,9 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	outputText := capture.String() + stdout.String()
 	if strings.Contains(outputText, secret) {
 		t.Fatalf("captured CLI output contains token: %q", outputText)
+	}
+	if !strings.Contains(outputText, `msg="polling fetch summary"`) || !strings.Contains(outputText, "self_successes=1") || !strings.Contains(outputText, "relationship_sync_successes=1") {
+		t.Fatalf("debug logging did not include the completed fetch summary: %q", outputText)
 	}
 
 	invalidSecret := "cli-invalid-config-secret"

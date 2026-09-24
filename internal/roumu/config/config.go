@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"log/slog"
 	"math"
 	"net/url"
 	"os"
@@ -19,6 +20,7 @@ var (
 	errTokenRequired     = errors.New("MISSKEY_TOKEN is required")
 	errPollingMode       = errors.New("POLLING_MODE must be observe")
 	errPollingSetting    = errors.New("polling setting is invalid")
+	errLogLevel          = errors.New("LOG_LEVEL must be DEBUG, INFO, WARN, or ERROR")
 )
 
 // PollingSettings is the validated process configuration passed to the
@@ -61,6 +63,9 @@ func LoadFromEnv(getenv func(string) string) (Config, error) {
 	if getenv == nil {
 		return Config{}, errEnvironmentLookup
 	}
+	if _, err := ParseLogLevel(getenv("LOG_LEVEL")); err != nil {
+		return Config{}, err
+	}
 
 	baseURL, err := parseBaseURL(getenv("MISSKEY_BASE_URL"))
 	if err != nil {
@@ -78,6 +83,23 @@ func LoadFromEnv(getenv func(string) string) (Config, error) {
 	}
 
 	return Config{baseURL: baseURL, token: token, polling: polling}, nil
+}
+
+// ParseLogLevel parses LOG_LEVEL without including its value in errors.
+// An empty value keeps the default INFO threshold.
+func ParseLogLevel(raw string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, errLogLevel
+	}
 }
 
 // BaseURL returns a copy of the validated Misskey base URL.

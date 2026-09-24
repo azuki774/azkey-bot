@@ -250,6 +250,123 @@ type Poller struct {
 	running bool
 }
 
+type fetchOperation uint8
+
+const (
+	fetchOperationSelf fetchOperation = iota
+	fetchOperationRelationshipSync
+	fetchOperationTargetNotes
+	fetchOperationCount
+)
+
+type fetchOperationCounts struct {
+	successes int
+	failures  int
+	inFlight  int
+}
+
+type fetchSummary struct {
+	mu         sync.Mutex
+	operations [fetchOperationCount]fetchOperationCounts
+}
+
+type fetchSummarySnapshot struct {
+	operations [fetchOperationCount]fetchOperationCounts
+}
+
+func newFetchSummary() *fetchSummary {
+	return &fetchSummary{}
+}
+
+func (s *fetchSummary) begin(operation fetchOperation) {
+	if s == nil || operation >= fetchOperationCount {
+		return
+	}
+	s.mu.Lock()
+	s.operations[operation].inFlight++
+	s.mu.Unlock()
+}
+
+func (s *fetchSummary) finish(operation fetchOperation, err error, ctx context.Context) {
+	if s == nil || operation >= fetchOperationCount {
+		return
+	}
+	s.mu.Lock()
+	counts := &s.operations[operation]
+	if counts.inFlight > 0 {
+		counts.inFlight--
+	}
+	if !errors.Is(err, errTargetGone) && (err == nil || ctx == nil || ctx.Err() == nil) {
+		if err == nil {
+			counts.successes++
+		} else {
+			counts.failures++
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *fetchSummary) take() fetchSummarySnapshot {
+	var snapshot fetchSummarySnapshot
+	if s == nil {
+		return snapshot
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for operation := range s.operations {
+		snapshot.operations[operation] = s.operations[operation]
+		s.operations[operation].successes = 0
+		s.operations[operation].failures = 0
+	}
+	return snapshot
+}
+
+func (c fetchOperationCounts) attempts() int {
+	return c.successes + c.failures
+}
+
+func (s fetchSummarySnapshot) attempts() int {
+	total := 0
+	for _, operation := range s.operations {
+		total += operation.attempts()
+	}
+	return total
+}
+
+func (s fetchSummarySnapshot) failures() int {
+	total := 0
+	for _, operation := range s.operations {
+		total += operation.failures
+	}
+	return total
+}
+
+func (s fetchSummarySnapshot) inFlight() int {
+	total := 0
+	for _, operation := range s.operations {
+		total += operation.inFlight
+	}
+	return total
+}
+
+func (s fetchSummarySnapshot) outcome() string {
+	attempts := s.attempts()
+	failures := s.failures()
+	if attempts == 0 {
+		if s.inFlight() > 0 {
+			return "in_progress"
+		}
+		return "idle"
+	}
+	if failures == 0 {
+		return "success"
+	}
+	if failures == attempts {
+		return "failure"
+	}
+	return "partial_failure"
+}
+
 type targetState struct {
 	mu sync.Mutex
 
@@ -363,11 +480,24 @@ func (p *Poller) Run(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return nil
 	}
+	var summary *fetchSummary
+	if p.logger != nil {
+		summary = newFetchSummary()
+		stopSummary := make(chan struct{})
+		summaryDone := make(chan struct{})
+		go p.reportFetchSummaries(summary, stopSummary, summaryDone)
+		defer func() {
+			close(stopSummary)
+			<-summaryDone
+			p.logFetchSummary(summary.take(), true)
+		}()
+	}
+
 	var self domain.User
 	selfBackoff := time.Duration(0)
 	for {
 		var err error
-		self, err = p.fetchSelf(ctx)
+		self, err = p.acquireSelf(ctx, summary)
 		if err == nil {
 			break
 		}
@@ -386,15 +516,12 @@ func (p *Poller) Run(ctx context.Context) error {
 			return err
 		}
 	}
-	if !validID(self.ID) {
-		return errInvalidResponse
-	}
 	p.stateMu.Lock()
 	p.selfID = self.ID
 	p.stateMu.Unlock()
 
 	now := p.now()
-	_, syncErr := p.fetchAndApplyTargets(ctx, now)
+	_, syncErr := p.syncTargets(ctx, now, summary)
 	if isContextError(syncErr, ctx) {
 		return nil
 	}
@@ -416,7 +543,7 @@ func (p *Poller) Run(ctx context.Context) error {
 	var workers sync.WaitGroup
 	for i := 0; i < workerCount; i++ {
 		workers.Add(1)
-		go p.worker(workerCtx, jobs, results, &workers)
+		go p.worker(workerCtx, jobs, results, &workers, summary)
 	}
 	defer func() {
 		cancel()
@@ -544,15 +671,15 @@ type pollResult struct {
 	err    error
 }
 
-func (p *Poller) worker(ctx context.Context, jobs <-chan pollJob, results chan<- pollResult, workers *sync.WaitGroup) {
+func (p *Poller) worker(ctx context.Context, jobs <-chan pollJob, results chan<- pollResult, workers *sync.WaitGroup, summary *fetchSummary) {
 	defer workers.Done()
 	for job := range jobs {
 		result := pollResult{kind: job.kind, target: job.target}
 		switch job.kind {
 		case pollJobSync:
-			_, result.err = p.fetchAndApplyTargets(ctx, p.now())
+			_, result.err = p.syncTargets(ctx, p.now(), summary)
 		case pollJobTarget:
-			result.err = p.processTarget(ctx, job.target)
+			result.err = p.runTargetTurn(ctx, job.target, summary)
 		}
 		select {
 		case results <- result:
@@ -560,6 +687,70 @@ func (p *Poller) worker(ctx context.Context, jobs <-chan pollJob, results chan<-
 			return
 		}
 	}
+}
+
+func (p *Poller) reportFetchSummaries(summary *fetchSummary, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(p.settings.PollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			p.logFetchSummary(summary.take(), false)
+		case <-stop:
+			return
+		}
+	}
+}
+
+func (p *Poller) logFetchSummary(snapshot fetchSummarySnapshot, final bool) {
+	if p.logger == nil || (final && snapshot.attempts() == 0) {
+		return
+	}
+	self := snapshot.operations[fetchOperationSelf]
+	sync := snapshot.operations[fetchOperationRelationshipSync]
+	notes := snapshot.operations[fetchOperationTargetNotes]
+	p.logger.Debug("polling fetch summary",
+		"window", p.settings.PollInterval,
+		"final", final,
+		"outcome", snapshot.outcome(),
+		"attempts", snapshot.attempts(),
+		"failures", snapshot.failures(),
+		"in_flight", snapshot.inFlight(),
+		"self_attempts", self.attempts(),
+		"self_successes", self.successes,
+		"self_failures", self.failures,
+		"relationship_sync_attempts", sync.attempts(),
+		"relationship_sync_successes", sync.successes,
+		"relationship_sync_failures", sync.failures,
+		"target_note_turns_attempts", notes.attempts(),
+		"target_note_turns_successes", notes.successes,
+		"target_note_turns_failures", notes.failures,
+	)
+}
+
+func (p *Poller) acquireSelf(ctx context.Context, summary *fetchSummary) (domain.User, error) {
+	summary.begin(fetchOperationSelf)
+	user, err := p.fetchSelf(ctx)
+	if err == nil && !validID(user.ID) {
+		err = errInvalidResponse
+	}
+	summary.finish(fetchOperationSelf, err, ctx)
+	return user, err
+}
+
+func (p *Poller) syncTargets(ctx context.Context, now time.Time, summary *fetchSummary) ([]string, error) {
+	summary.begin(fetchOperationRelationshipSync)
+	targets, err := p.fetchAndApplyTargets(ctx, now)
+	summary.finish(fetchOperationRelationshipSync, err, ctx)
+	return targets, err
+}
+
+func (p *Poller) runTargetTurn(ctx context.Context, target *targetState, summary *fetchSummary) error {
+	summary.begin(fetchOperationTargetNotes)
+	err := p.processTarget(ctx, target)
+	summary.finish(fetchOperationTargetNotes, err, ctx)
+	return err
 }
 
 // dueTargets returns targets ordered by due time and ID. A stable ID order
