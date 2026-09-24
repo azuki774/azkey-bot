@@ -349,6 +349,104 @@ func TestCreateFollowAndReactionUseExpectedWriteEndpoints(t *testing.T) {
 	}
 }
 
+func TestGetRelationsSendsArrayAndConvertsStrictRelationshipState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/users/relation" {
+			t.Errorf("request = %s %s, want POST /api/users/relation", r.Method, r.URL.Path)
+		}
+		body := decodeRequest(t, r)
+		ids, ok := body["userId"].([]any)
+		if !ok || len(ids) != 2 || ids[0] != "target-one" || ids[1] != "target-two" {
+			t.Errorf("userId = %#v, want array [target-one target-two]", body["userId"])
+		}
+		if body["i"] != "relation-token" {
+			t.Errorf("token = %v", body["i"])
+		}
+		writeJSON(w, http.StatusOK, []map[string]any{
+			testRelationDTO("target-one", true, false, false, false, false),
+			testRelationDTO("target-two", false, true, true, false, false),
+		})
+	}))
+	defer server.Close()
+
+	relations, err := newTestClient(t, server, "relation-token").GetRelations(context.Background(), []string{"target-one", "target-two"})
+	if err != nil {
+		t.Fatalf("GetRelations returned error: %v", err)
+	}
+	if len(relations) != 2 || relations[0].ID != "target-one" || !relations[0].IsFollowing || relations[0].IsFollowed || relations[1].ID != "target-two" || relations[1].IsFollowing || !relations[1].IsFollowed || !relations[1].HasPendingFollowRequestFromYou {
+		t.Fatalf("relations = %+v", relations)
+	}
+}
+
+func TestGetRelationsRejectsIncompleteOrAmbiguousResponses(t *testing.T) {
+	validOne := testRelationDTO("target-one", false, true, false, false, false)
+	validTwo := testRelationDTO("target-two", false, true, false, false, false)
+	missingBool := testRelationDTO("target-one", false, true, false, false, false)
+	delete(missingBool, "isBlocked")
+	nullBool := testRelationDTO("target-one", false, true, false, false, false)
+	nullBool["isBlocking"] = nil
+	extraID := testRelationDTO("unrequested", false, true, false, false, false)
+	missingID := testRelationDTO("", false, true, false, false, false)
+	delete(missingID, "id")
+	tests := []struct {
+		name string
+		body any
+	}{
+		{name: "null array", body: nil},
+		{name: "object instead of array", body: validOne},
+		{name: "missing requested item", body: []any{validOne}},
+		{name: "duplicate ID", body: []any{validOne, validOne}},
+		{name: "unexpected ID", body: []any{validOne, extraID}},
+		{name: "missing ID", body: []any{missingID, validTwo}},
+		{name: "missing boolean", body: []any{missingBool, validTwo}},
+		{name: "null boolean", body: []any{nullBool, validTwo}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, http.StatusOK, test.body)
+			}))
+			defer server.Close()
+			_, err := newTestClient(t, server, "relation-invalid-token").GetRelations(context.Background(), []string{"target-one", "target-two"})
+			var apiErr *domain.Error
+			if !errors.As(err, &apiErr) || apiErr.Kind != domain.ErrorKindInvalidResponse {
+				t.Fatalf("GetRelations error = %#v, want invalid response", err)
+			}
+		})
+	}
+}
+
+func TestDeleteFollowUsesExpectedEndpointAndRejectsMismatchedUser(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/following/delete" {
+				t.Errorf("path = %q, want /api/following/delete", r.URL.Path)
+			}
+			body := decodeRequest(t, r)
+			if body["userId"] != "target" {
+				t.Errorf("userId = %v, want target", body["userId"])
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"id": "target", "username": "target", "name": nil, "host": nil})
+		}))
+		defer server.Close()
+		user, err := newTestClient(t, server, "delete-token").DeleteFollow(context.Background(), "target")
+		if err != nil || user.ID != "target" {
+			t.Fatalf("DeleteFollow = %+v, %v", user, err)
+		}
+	})
+	t.Run("mismatched user", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]any{"id": "other", "username": "other", "name": nil, "host": nil})
+		}))
+		defer server.Close()
+		_, err := newTestClient(t, server, "delete-token").DeleteFollow(context.Background(), "target")
+		var apiErr *domain.Error
+		if !errors.As(err, &apiErr) || apiErr.Kind != domain.ErrorKindInvalidResponse {
+			t.Fatalf("DeleteFollow error = %#v, want invalid response", err)
+		}
+	})
+}
+
 func TestWriteFailureIsNotRetried(t *testing.T) {
 	tests := []struct {
 		name string
@@ -682,6 +780,17 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func testRelationDTO(id string, following, followed, pending, blocking, blocked bool) map[string]any {
+	return map[string]any{
+		"id":                             id,
+		"isFollowing":                    following,
+		"isFollowed":                     followed,
+		"hasPendingFollowRequestFromYou": pending,
+		"isBlocking":                     blocking,
+		"isBlocked":                      blocked,
+	}
 }
 
 func durationPointer(value time.Duration) *time.Duration {

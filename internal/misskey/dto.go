@@ -38,6 +38,11 @@ type followRequest struct {
 	UserID string `json:"userId"`
 }
 
+type relationsRequest struct {
+	I      string   `json:"i"`
+	UserID []string `json:"userId"`
+}
+
 type reactionRequest struct {
 	I        string `json:"i"`
 	NoteID   string `json:"noteId"`
@@ -70,6 +75,29 @@ type followingDTO struct {
 	FolloweeID string   `json:"followeeId"`
 	Follower   *userDTO `json:"follower"`
 	Followee   *userDTO `json:"followee"`
+}
+
+type relationDTO struct {
+	ID                             string `json:"id"`
+	IsFollowing                    *bool  `json:"isFollowing"`
+	IsFollowed                     *bool  `json:"isFollowed"`
+	HasPendingFollowRequestFromYou *bool  `json:"hasPendingFollowRequestFromYou"`
+	IsBlocking                     *bool  `json:"isBlocking"`
+	IsBlocked                      *bool  `json:"isBlocked"`
+}
+
+func (r relationDTO) toDomain() (domain.Relation, error) {
+	if r.ID == "" || r.IsFollowing == nil || r.IsFollowed == nil || r.HasPendingFollowRequestFromYou == nil || r.IsBlocking == nil || r.IsBlocked == nil {
+		return domain.Relation{}, errors.New("relation response is incomplete")
+	}
+	return domain.Relation{
+		ID:                             r.ID,
+		IsFollowing:                    *r.IsFollowing,
+		IsFollowed:                     *r.IsFollowed,
+		HasPendingFollowRequestFromYou: *r.HasPendingFollowRequestFromYou,
+		IsBlocking:                     *r.IsBlocking,
+		IsBlocked:                      *r.IsBlocked,
+	}, nil
 }
 
 func (f followingDTO) toDomain() (domain.Following, error) {

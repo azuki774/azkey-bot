@@ -1,9 +1,8 @@
 // Package polling owns the cancellable azkey-roumu-bot polling lifecycle.
 //
-// Polling is deliberately read-only. It acquires mutual follow relationships
-// and notes, then hands eligible notes to a NoteHandler. The handler is the
-// boundary for business processing; this package never creates follows or
-// reactions.
+// Polling acquires follower relationships and notes, then hands eligible notes
+// to a NoteHandler. Relationship writes are delegated to a separate
+// FollowerSynchronizer; note processing remains independent of those writes.
 package polling
 
 import (
@@ -30,12 +29,12 @@ var (
 	errInvalidResponse            = errors.New("polling response is invalid")
 	errStuckCursor                = errors.New("polling cursor did not advance")
 	errRelationshipSyncIncomplete = errors.New("relationship pagination did not complete")
-	errTargetGone                 = errors.New("polling target is no longer mutual")
+	errTargetGone                 = errors.New("polling target is no longer a follower")
 )
 
 const (
 	defaultPollInterval         = time.Minute
-	defaultFollowerSyncInterval = 5 * time.Minute
+	defaultFollowerSyncInterval = 10 * time.Minute
 	defaultConcurrency          = 2
 	defaultRatePerSecond        = 2.0
 	defaultRateBurst            = 1
@@ -60,9 +59,14 @@ type SleepFunc func(context.Context, time.Duration) error
 // RateLimiter is shared by self, relationship, and note requests. SetCooldown
 // is used for a server-provided rate-limit window so all request classes
 // observe the same cooldown.
-type RateLimiter interface {
-	Wait(context.Context) error
-	SetCooldown(time.Time)
+type RateLimiter = domain.RequestLimiter
+
+// FollowerSynchronizer receives a replacement snapshot only after both
+// relationship lists have been fully fetched and validated.
+type FollowerSynchronizer interface {
+	Run(context.Context) error
+	InvalidateSnapshot()
+	UpdateSnapshot(selfID string, followerIDs, followingIDs []string)
 }
 
 // Settings controls polling load and in-memory state bounds.
@@ -90,10 +94,15 @@ type Settings struct {
 	// useful for deterministic tests and for embedding applications with a
 	// shared limiter.
 	RateLimiter RateLimiter
+
+	// FollowerSynchronizer is optional for read-only embedders. The command
+	// supplies the bot-layer coordinator so relationship writes run separately
+	// from the note worker pool.
+	FollowerSynchronizer FollowerSynchronizer
 }
 
-// DefaultSettings returns the approved production defaults: up to 100
-// mutual targets, a usual one-to-two minute observation latency, two concurrent
+// DefaultSettings returns the production defaults: all followers are monitored,
+// with a usual one-to-two minute observation latency, two concurrent
 // workers, and two read requests per second with a burst of one.
 func DefaultSettings() Settings {
 	return Settings{
@@ -234,11 +243,12 @@ type Client interface {
 // memory-only; restarting the process re-establishes baselines instead of
 // attempting to infer notes missed while it was down.
 type Poller struct {
-	client   Client
-	handler  NoteHandler
-	settings Settings
-	logger   *slog.Logger
-	limiter  RateLimiter
+	client             Client
+	handler            NoteHandler
+	settings           Settings
+	logger             *slog.Logger
+	limiter            RateLimiter
+	followSynchronizer FollowerSynchronizer
 
 	stateMu    sync.Mutex
 	selfID     string
@@ -423,13 +433,14 @@ func New(client Client, handler NoteHandler, options ...Option) (*Poller, error)
 		limiter = newTokenBucket(settings.RatePerSecond, settings.RateBurst, settings.Clock, settings.Sleep)
 	}
 	return &Poller{
-		client:   client,
-		handler:  handler,
-		settings: settings,
-		logger:   logger,
-		limiter:  limiter,
-		targets:  make(map[string]*targetState),
-		dedup:    newDedupCache(settings.DedupLimit, settings.DedupTTL),
+		client:             client,
+		handler:            handler,
+		settings:           settings,
+		logger:             logger,
+		limiter:            limiter,
+		followSynchronizer: settings.FollowerSynchronizer,
+		targets:            make(map[string]*targetState),
+		dedup:              newDedupCache(settings.DedupLimit, settings.DedupTTL),
 	}, nil
 }
 
@@ -449,7 +460,7 @@ func nilHandler(handler NoteHandler) bool {
 	return (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface || value.Kind() == reflect.Map || value.Kind() == reflect.Func || value.Kind() == reflect.Slice) && value.IsNil()
 }
 
-// Run initializes the authenticated user, synchronizes the complete mutual
+// Run initializes the authenticated user, synchronizes the complete follower
 // target snapshot, and then schedules serialized per-user note workers until
 // ctx is canceled. Authentication failures terminate the lifecycle; transient
 // read failures preserve the previous snapshot and are retried with backoff.
@@ -519,6 +530,22 @@ func (p *Poller) Run(ctx context.Context) error {
 	p.stateMu.Lock()
 	p.selfID = self.ID
 	p.stateMu.Unlock()
+
+	var followCancel context.CancelFunc
+	var followDone chan error
+	followFinished := false
+	if p.followSynchronizer != nil && !nilFollowerSynchronizer(p.followSynchronizer) {
+		followCtx, cancel := context.WithCancel(ctx)
+		followCancel = cancel
+		followDone = make(chan error, 1)
+		go func() { followDone <- p.followSynchronizer.Run(followCtx) }()
+		defer func() {
+			followCancel()
+			if !followFinished {
+				<-followDone
+			}
+		}()
+	}
 
 	now := p.now()
 	_, syncErr := p.syncTargets(ctx, now, summary)
@@ -631,6 +658,16 @@ func (p *Poller) Run(ctx context.Context) error {
 			case <-ctx.Done():
 				stopTimer(timer)
 				return nil
+			case followErr := <-followDone:
+				followFinished = true
+				stopTimer(timer)
+				if ctx.Err() != nil {
+					return nil
+				}
+				if followErr != nil {
+					return followErr
+				}
+				return errors.New("follower synchronizer stopped unexpectedly")
 			}
 			continue
 		}
@@ -647,7 +684,33 @@ func (p *Poller) Run(ctx context.Context) error {
 		if next.IsZero() {
 			next = p.now().Add(p.settings.FollowerSyncInterval)
 		}
-		if err := p.sleepUntil(ctx, next); err != nil {
+		if followDone == nil {
+			if err := p.sleepUntil(ctx, next); err != nil {
+				return nil
+			}
+			continue
+		}
+		waitCtx, cancelWait := context.WithCancel(ctx)
+		sleepDone := make(chan error, 1)
+		go func() { sleepDone <- p.sleepUntil(waitCtx, next) }()
+		select {
+		case err := <-sleepDone:
+			cancelWait()
+			if err != nil {
+				return nil
+			}
+		case followErr := <-followDone:
+			followFinished = true
+			cancelWait()
+			if ctx.Err() != nil {
+				return nil
+			}
+			if followErr != nil {
+				return followErr
+			}
+			return errors.New("follower synchronizer stopped unexpectedly")
+		case <-ctx.Done():
+			cancelWait()
 			return nil
 		}
 	}
@@ -873,6 +936,11 @@ const (
 )
 
 func (p *Poller) fetchAndApplyTargets(ctx context.Context, now time.Time) ([]string, error) {
+	if p.followSynchronizer != nil && !nilFollowerSynchronizer(p.followSynchronizer) {
+		// Do not let the standalone relationship worker act on stale data while
+		// a new complete pair of relationship lists is being acquired.
+		p.followSynchronizer.InvalidateSnapshot()
+	}
 	inbound, err := p.fetchRelationshipIDs(ctx, inboundRelationships)
 	if err != nil {
 		return nil, err
@@ -882,19 +950,14 @@ func (p *Poller) fetchAndApplyTargets(ctx context.Context, now time.Time) ([]str
 		return nil, err
 	}
 
-	outboundSet := make(map[string]struct{}, len(outbound))
-	for _, id := range outbound {
-		outboundSet[id] = struct{}{}
+	// The complete follower set defines note targets. Outbound relationships
+	// are retained separately for the bot-layer reconciliation coordinator.
+	sort.Strings(inbound)
+	p.applyTargetSnapshot(inbound, now)
+	if p.followSynchronizer != nil && !nilFollowerSynchronizer(p.followSynchronizer) {
+		p.followSynchronizer.UpdateSnapshot(p.selfIdentifier(), inbound, outbound)
 	}
-	mutual := make([]string, 0, len(inbound))
-	for _, id := range inbound {
-		if _, present := outboundSet[id]; present {
-			mutual = append(mutual, id)
-		}
-	}
-	sort.Strings(mutual)
-	p.applyTargetSnapshot(mutual, now)
-	return mutual, nil
+	return inbound, nil
 }
 
 func (p *Poller) fetchRelationshipIDs(ctx context.Context, direction relationshipDirection) ([]string, error) {
@@ -1259,6 +1322,23 @@ func (p *Poller) read(ctx context.Context, request func(context.Context) error) 
 		p.limiter.SetCooldown(p.now().Add(delay))
 	}
 	return err
+}
+
+func nilFollowerSynchronizer(synchronizer FollowerSynchronizer) bool {
+	if synchronizer == nil {
+		return true
+	}
+	value := reflect.ValueOf(synchronizer)
+	return (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface || value.Kind() == reflect.Map || value.Kind() == reflect.Func || value.Kind() == reflect.Slice) && value.IsNil()
+}
+
+// NewRateLimiter creates the shared API request limiter used for both polling
+// reads and relationship writes.
+func NewRateLimiter(ratePerSecond float64, burst int) (RateLimiter, error) {
+	if ratePerSecond <= 0 || math.IsNaN(ratePerSecond) || math.IsInf(ratePerSecond, 0) || burst <= 0 {
+		return nil, errors.New("API rate settings must be positive")
+	}
+	return newTokenBucket(ratePerSecond, burst, time.Now, sleepContext), nil
 }
 
 func (p *Poller) nextBackoff(previous time.Duration) time.Duration {
