@@ -17,7 +17,7 @@ var (
 	errBaseURLRequired   = errors.New("MISSKEY_BASE_URL is required")
 	errBaseURLInvalid    = errors.New("MISSKEY_BASE_URL must be an absolute HTTP or HTTPS URL without userinfo, query, or fragment")
 	errTokenRequired     = errors.New("MISSKEY_TOKEN is required")
-	errPollingMode       = errors.New("POLLING_MODE must be observe")
+	errPollingMode       = errors.New("POLLING_MODE must be observe or reply")
 	errPollingSetting    = errors.New("polling setting is invalid")
 )
 
@@ -119,7 +119,7 @@ func loadPollingSettings(getenv func(string) string) (PollingSettings, error) {
 	if value := strings.TrimSpace(getenv("POLLING_MODE")); value != "" {
 		settings.Mode = value
 	}
-	if settings.Mode != "observe" {
+	if settings.Mode != "observe" && settings.Mode != "reply" {
 		return PollingSettings{}, errPollingMode
 	}
 

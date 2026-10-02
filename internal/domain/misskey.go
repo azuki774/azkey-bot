@@ -31,6 +31,7 @@ type NotePageOptions struct {
 
 // User is the small user projection used by the bot.
 type User struct {
+	IsBot    bool
 	ID       string
 	Username string
 	Name     *string
@@ -51,11 +52,15 @@ type Following struct {
 // Note is the small note projection needed by the bot. Text and CW are
 // nullable in Misskey responses, including for notes such as pure renotes.
 type Note struct {
-	ID         string
-	CreatedAt  time.Time
-	UserID     string
-	Text       *string
-	CW         *string
-	Visibility string
-	User       *User
+	ReplyID     string
+	ReplyUserID string
+	ChannelID   string
+	LocalOnly   bool
+	ID          string
+	CreatedAt   time.Time
+	UserID      string
+	Text        *string
+	CW          *string
+	Visibility  string
+	User        *User
 }

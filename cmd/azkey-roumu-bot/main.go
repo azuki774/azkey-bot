@@ -1,4 +1,4 @@
-// Command azkey-roumu-bot observes public notes from mutual targets through read-only polling.
+// Command azkey-roumu-bot observes mutual targets or answers check-in inquiries.
 package main
 
 import (
@@ -14,6 +14,7 @@ import (
 	"github.com/azuki774/azkey-bot/internal/roumu/bot"
 	"github.com/azuki774/azkey-bot/internal/roumu/config"
 	"github.com/azuki774/azkey-bot/internal/roumu/polling"
+	"github.com/azuki774/azkey-bot/internal/roumu/repository/memory"
 )
 
 func main() {
@@ -77,11 +78,20 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 	settings.StartupSpread = configured.StartupSpread
 	settings.BackoffBase = configured.BackoffBase
 	settings.BackoffMax = configured.BackoffMax
-	poller, err := polling.New(client, polling.ObservationHandler{Logger: logger}, polling.WithSettings(settings), polling.WithLogger(logger))
+	var consumer bot.Consumer
+	if configured.Mode == "reply" {
+		replyClient, ok := client.(bot.ReplyClient)
+		if !ok {
+			return errors.New("misskey client does not support replies")
+		}
+		consumer, err = bot.NewReplies(replyClient, &memory.Users{}, settings, logger)
+	} else {
+		consumer, err = polling.New(client, polling.ObservationHandler{Logger: logger}, polling.WithSettings(settings), polling.WithLogger(logger))
+	}
 	if err != nil {
 		return err
 	}
-	runner, err := bot.NewRunner(poller)
+	runner, err := bot.NewRunner(consumer)
 	if err != nil {
 		return err
 	}

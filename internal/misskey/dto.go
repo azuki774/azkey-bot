@@ -45,6 +45,7 @@ type reactionRequest struct {
 }
 
 type userDTO struct {
+	IsBot    bool    `json:"isBot"`
 	ID       string  `json:"id"`
 	Username string  `json:"username"`
 	Name     *string `json:"name"`
@@ -56,6 +57,7 @@ func (u userDTO) toDomain() (domain.User, error) {
 		return domain.User{}, errors.New("user response is missing an identifier")
 	}
 	return domain.User{
+		IsBot:    u.IsBot,
 		ID:       u.ID,
 		Username: u.Username,
 		Name:     u.Name,
@@ -99,6 +101,12 @@ func (f followingDTO) toDomain() (domain.Following, error) {
 }
 
 type noteDTO struct {
+	ReplyID string `json:"replyId"`
+	Reply   *struct {
+		UserID string `json:"userId"`
+	} `json:"reply"`
+	ChannelID  string   `json:"channelId"`
+	LocalOnly  bool     `json:"localOnly"`
 	ID         string   `json:"id"`
 	CreatedAt  string   `json:"createdAt"`
 	UserID     string   `json:"userId"`
@@ -120,14 +128,22 @@ func (n noteDTO) toDomain() (domain.Note, error) {
 	if err != nil {
 		return domain.Note{}, err
 	}
+	replyUserID := ""
+	if n.Reply != nil {
+		replyUserID = n.Reply.UserID
+	}
 	return domain.Note{
-		ID:         n.ID,
-		CreatedAt:  createdAt,
-		UserID:     n.UserID,
-		Text:       n.Text,
-		CW:         n.CW,
-		Visibility: n.Visibility,
-		User:       user,
+		ReplyID:     n.ReplyID,
+		ReplyUserID: replyUserID,
+		ChannelID:   n.ChannelID,
+		LocalOnly:   n.LocalOnly,
+		ID:          n.ID,
+		CreatedAt:   createdAt,
+		UserID:      n.UserID,
+		Text:        n.Text,
+		CW:          n.CW,
+		Visibility:  n.Visibility,
+		User:        user,
 	}, nil
 }
 

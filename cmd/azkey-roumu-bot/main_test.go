@@ -30,6 +30,54 @@ type logCapture struct {
 	stoppedOnce sync.Once
 }
 
+func TestReplyModeWiresHTTPClientAndRepository(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var mu sync.Mutex
+	var reply map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/i":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "bot", "username": "bot"})
+		case "/api/notes/mentions":
+			if request["sinceDate"] == nil {
+				t.Error("missing startup baseline")
+			}
+			_ = json.NewEncoder(w).Encode([]any{map[string]any{
+				"id": "inquiry", "createdAt": time.Now().UTC().Format(time.RFC3339Nano), "userId": "member", "visibility": "public",
+				"replyId": "parent", "reply": map[string]any{"userId": "bot"},
+				"user": map[string]any{"id": "member", "username": "member", "isBot": false},
+			}})
+		case "/api/users/relation":
+			_ = json.NewEncoder(w).Encode([]any{map[string]any{"id": "member", "isFollowing": true}})
+		case "/api/notes/create":
+			mu.Lock()
+			reply = request
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"createdNote": map[string]any{"id": "response"}})
+			cancel()
+		default:
+			t.Errorf("unexpected endpoint in reply mode: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	env := map[string]string{"MISSKEY_BASE_URL": server.URL, "MISSKEY_TOKEN": "test-secret", "POLLING_MODE": "reply", "POLL_RATE_PER_SECOND": "1000"}
+	if err := run(ctx, mainMapLookup(env), nil); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if reply["replyId"] != "inquiry" || reply["visibility"] != "public" || reply["text"] != "連続チェックイン回数: 0連勤、チェックイン回数: 0 日" {
+		t.Fatalf("reply: %v", reply)
+	}
+}
+
 func newLogCapture() *logCapture {
 	return &logCapture{
 		started: make(chan struct{}),
