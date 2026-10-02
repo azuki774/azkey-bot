@@ -1,9 +1,8 @@
 // Package polling owns the cancellable azkey-roumu-bot polling lifecycle.
 //
-// Polling is deliberately read-only. It acquires mutual follow relationships
-// and notes, then hands eligible notes to a NoteHandler. The handler is the
-// boundary for business processing; this package never creates follows or
-// reactions.
+// Polling acquires follower relationships and notes, then hands eligible notes
+// to a NoteHandler. Relationship writes are delegated to a separate
+// FollowerSynchronizer; note processing remains independent of those writes.
 package polling
 
 import (
@@ -30,12 +29,12 @@ var (
 	errInvalidResponse            = errors.New("polling response is invalid")
 	errStuckCursor                = errors.New("polling cursor did not advance")
 	errRelationshipSyncIncomplete = errors.New("relationship pagination did not complete")
-	errTargetGone                 = errors.New("polling target is no longer mutual")
+	errTargetGone                 = errors.New("polling target is no longer a follower")
 )
 
 const (
 	defaultPollInterval         = time.Minute
-	defaultFollowerSyncInterval = 5 * time.Minute
+	defaultFollowerSyncInterval = 10 * time.Minute
 	defaultConcurrency          = 2
 	defaultRatePerSecond        = 2.0
 	defaultRateBurst            = 1
@@ -60,9 +59,14 @@ type SleepFunc func(context.Context, time.Duration) error
 // RateLimiter is shared by self, relationship, and note requests. SetCooldown
 // is used for a server-provided rate-limit window so all request classes
 // observe the same cooldown.
-type RateLimiter interface {
-	Wait(context.Context) error
-	SetCooldown(time.Time)
+type RateLimiter = domain.RequestLimiter
+
+// FollowerSynchronizer receives a replacement snapshot only after both
+// relationship lists have been fully fetched and validated.
+type FollowerSynchronizer interface {
+	Run(context.Context) error
+	InvalidateSnapshot()
+	UpdateSnapshot(selfID string, followerIDs, followingIDs []string)
 }
 
 // Settings controls polling load and in-memory state bounds.
@@ -90,10 +94,15 @@ type Settings struct {
 	// useful for deterministic tests and for embedding applications with a
 	// shared limiter.
 	RateLimiter RateLimiter
+
+	// FollowerSynchronizer is optional for read-only embedders. The command
+	// supplies the bot-layer coordinator so relationship writes run separately
+	// from the note worker pool.
+	FollowerSynchronizer FollowerSynchronizer
 }
 
-// DefaultSettings returns the approved production defaults: up to 100
-// mutual targets, a usual one-to-two minute observation latency, two concurrent
+// DefaultSettings returns the production defaults: all followers are monitored,
+// with a usual one-to-two minute observation latency, two concurrent
 // workers, and two read requests per second with a burst of one.
 func DefaultSettings() Settings {
 	return Settings{
@@ -216,11 +225,12 @@ type Client interface {
 // memory-only; restarting the process re-establishes baselines instead of
 // attempting to infer notes missed while it was down.
 type Poller struct {
-	client   Client
-	handler  NoteHandler
-	settings Settings
-	logger   *slog.Logger
-	limiter  RateLimiter
+	client             Client
+	handler            NoteHandler
+	settings           Settings
+	logger             *slog.Logger
+	limiter            RateLimiter
+	followSynchronizer FollowerSynchronizer
 
 	stateMu    sync.Mutex
 	selfID     string
@@ -230,6 +240,123 @@ type Poller struct {
 
 	runMu   sync.Mutex
 	running bool
+}
+
+type fetchOperation uint8
+
+const (
+	fetchOperationSelf fetchOperation = iota
+	fetchOperationRelationshipSync
+	fetchOperationTargetNotes
+	fetchOperationCount
+)
+
+type fetchOperationCounts struct {
+	successes int
+	failures  int
+	inFlight  int
+}
+
+type fetchSummary struct {
+	mu         sync.Mutex
+	operations [fetchOperationCount]fetchOperationCounts
+}
+
+type fetchSummarySnapshot struct {
+	operations [fetchOperationCount]fetchOperationCounts
+}
+
+func newFetchSummary() *fetchSummary {
+	return &fetchSummary{}
+}
+
+func (s *fetchSummary) begin(operation fetchOperation) {
+	if s == nil || operation >= fetchOperationCount {
+		return
+	}
+	s.mu.Lock()
+	s.operations[operation].inFlight++
+	s.mu.Unlock()
+}
+
+func (s *fetchSummary) finish(operation fetchOperation, err error, ctx context.Context) {
+	if s == nil || operation >= fetchOperationCount {
+		return
+	}
+	s.mu.Lock()
+	counts := &s.operations[operation]
+	if counts.inFlight > 0 {
+		counts.inFlight--
+	}
+	if !errors.Is(err, errTargetGone) && (err == nil || ctx == nil || ctx.Err() == nil) {
+		if err == nil {
+			counts.successes++
+		} else {
+			counts.failures++
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *fetchSummary) take() fetchSummarySnapshot {
+	var snapshot fetchSummarySnapshot
+	if s == nil {
+		return snapshot
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for operation := range s.operations {
+		snapshot.operations[operation] = s.operations[operation]
+		s.operations[operation].successes = 0
+		s.operations[operation].failures = 0
+	}
+	return snapshot
+}
+
+func (c fetchOperationCounts) attempts() int {
+	return c.successes + c.failures
+}
+
+func (s fetchSummarySnapshot) attempts() int {
+	total := 0
+	for _, operation := range s.operations {
+		total += operation.attempts()
+	}
+	return total
+}
+
+func (s fetchSummarySnapshot) failures() int {
+	total := 0
+	for _, operation := range s.operations {
+		total += operation.failures
+	}
+	return total
+}
+
+func (s fetchSummarySnapshot) inFlight() int {
+	total := 0
+	for _, operation := range s.operations {
+		total += operation.inFlight
+	}
+	return total
+}
+
+func (s fetchSummarySnapshot) outcome() string {
+	attempts := s.attempts()
+	failures := s.failures()
+	if attempts == 0 {
+		if s.inFlight() > 0 {
+			return "in_progress"
+		}
+		return "idle"
+	}
+	if failures == 0 {
+		return "success"
+	}
+	if failures == attempts {
+		return "failure"
+	}
+	return "partial_failure"
 }
 
 type targetState struct {
@@ -288,13 +415,14 @@ func New(client Client, handler NoteHandler, options ...Option) (*Poller, error)
 		limiter = newTokenBucket(settings.RatePerSecond, settings.RateBurst, settings.Clock, settings.Sleep)
 	}
 	return &Poller{
-		client:   client,
-		handler:  handler,
-		settings: settings,
-		logger:   logger,
-		limiter:  limiter,
-		targets:  make(map[string]*targetState),
-		dedup:    newDedupCache(settings.DedupLimit, settings.DedupTTL),
+		client:             client,
+		handler:            handler,
+		settings:           settings,
+		logger:             logger,
+		limiter:            limiter,
+		followSynchronizer: settings.FollowerSynchronizer,
+		targets:            make(map[string]*targetState),
+		dedup:              newDedupCache(settings.DedupLimit, settings.DedupTTL),
 	}, nil
 }
 
@@ -314,7 +442,7 @@ func nilHandler(handler NoteHandler) bool {
 	return (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface || value.Kind() == reflect.Map || value.Kind() == reflect.Func || value.Kind() == reflect.Slice) && value.IsNil()
 }
 
-// Run initializes the authenticated user, synchronizes the complete mutual
+// Run initializes the authenticated user, synchronizes the complete follower
 // target snapshot, and then schedules serialized per-user note workers until
 // ctx is canceled. Authentication failures terminate the lifecycle; transient
 // read failures preserve the previous snapshot and are retried with backoff.
@@ -345,11 +473,24 @@ func (p *Poller) Run(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return nil
 	}
+	var summary *fetchSummary
+	if p.logger != nil {
+		summary = newFetchSummary()
+		stopSummary := make(chan struct{})
+		summaryDone := make(chan struct{})
+		go p.reportFetchSummaries(summary, stopSummary, summaryDone)
+		defer func() {
+			close(stopSummary)
+			<-summaryDone
+			p.logFetchSummary(summary.take(), true)
+		}()
+	}
+
 	var self domain.User
 	selfBackoff := time.Duration(0)
 	for {
 		var err error
-		self, err = p.fetchSelf(ctx)
+		self, err = p.acquireSelf(ctx, summary)
 		if err == nil {
 			break
 		}
@@ -368,15 +509,28 @@ func (p *Poller) Run(ctx context.Context) error {
 			return err
 		}
 	}
-	if !validID(self.ID) {
-		return errInvalidResponse
-	}
 	p.stateMu.Lock()
 	p.selfID = self.ID
 	p.stateMu.Unlock()
 
+	var followCancel context.CancelFunc
+	var followDone chan error
+	followFinished := false
+	if p.followSynchronizer != nil && !nilFollowerSynchronizer(p.followSynchronizer) {
+		followCtx, cancel := context.WithCancel(ctx)
+		followCancel = cancel
+		followDone = make(chan error, 1)
+		go func() { followDone <- p.followSynchronizer.Run(followCtx) }()
+		defer func() {
+			followCancel()
+			if !followFinished {
+				<-followDone
+			}
+		}()
+	}
+
 	now := p.now()
-	_, syncErr := p.fetchAndApplyTargets(ctx, now)
+	_, syncErr := p.syncTargets(ctx, now, summary)
 	if isContextError(syncErr, ctx) {
 		return nil
 	}
@@ -398,7 +552,7 @@ func (p *Poller) Run(ctx context.Context) error {
 	var workers sync.WaitGroup
 	for i := 0; i < workerCount; i++ {
 		workers.Add(1)
-		go p.worker(workerCtx, jobs, results, &workers)
+		go p.worker(workerCtx, jobs, results, &workers, summary)
 	}
 	defer func() {
 		cancel()
@@ -486,6 +640,16 @@ func (p *Poller) Run(ctx context.Context) error {
 			case <-ctx.Done():
 				stopTimer(timer)
 				return nil
+			case followErr := <-followDone:
+				followFinished = true
+				stopTimer(timer)
+				if ctx.Err() != nil {
+					return nil
+				}
+				if followErr != nil {
+					return followErr
+				}
+				return errors.New("follower synchronizer stopped unexpectedly")
 			}
 			continue
 		}
@@ -502,7 +666,33 @@ func (p *Poller) Run(ctx context.Context) error {
 		if next.IsZero() {
 			next = p.now().Add(p.settings.FollowerSyncInterval)
 		}
-		if err := p.sleepUntil(ctx, next); err != nil {
+		if followDone == nil {
+			if err := p.sleepUntil(ctx, next); err != nil {
+				return nil
+			}
+			continue
+		}
+		waitCtx, cancelWait := context.WithCancel(ctx)
+		sleepDone := make(chan error, 1)
+		go func() { sleepDone <- p.sleepUntil(waitCtx, next) }()
+		select {
+		case err := <-sleepDone:
+			cancelWait()
+			if err != nil {
+				return nil
+			}
+		case followErr := <-followDone:
+			followFinished = true
+			cancelWait()
+			if ctx.Err() != nil {
+				return nil
+			}
+			if followErr != nil {
+				return followErr
+			}
+			return errors.New("follower synchronizer stopped unexpectedly")
+		case <-ctx.Done():
+			cancelWait()
 			return nil
 		}
 	}
@@ -526,15 +716,15 @@ type pollResult struct {
 	err    error
 }
 
-func (p *Poller) worker(ctx context.Context, jobs <-chan pollJob, results chan<- pollResult, workers *sync.WaitGroup) {
+func (p *Poller) worker(ctx context.Context, jobs <-chan pollJob, results chan<- pollResult, workers *sync.WaitGroup, summary *fetchSummary) {
 	defer workers.Done()
 	for job := range jobs {
 		result := pollResult{kind: job.kind, target: job.target}
 		switch job.kind {
 		case pollJobSync:
-			_, result.err = p.fetchAndApplyTargets(ctx, p.now())
+			_, result.err = p.syncTargets(ctx, p.now(), summary)
 		case pollJobTarget:
-			result.err = p.processTarget(ctx, job.target)
+			result.err = p.runTargetTurn(ctx, job.target, summary)
 		}
 		select {
 		case results <- result:
@@ -542,6 +732,70 @@ func (p *Poller) worker(ctx context.Context, jobs <-chan pollJob, results chan<-
 			return
 		}
 	}
+}
+
+func (p *Poller) reportFetchSummaries(summary *fetchSummary, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(p.settings.PollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			p.logFetchSummary(summary.take(), false)
+		case <-stop:
+			return
+		}
+	}
+}
+
+func (p *Poller) logFetchSummary(snapshot fetchSummarySnapshot, final bool) {
+	if p.logger == nil || (final && snapshot.attempts() == 0) {
+		return
+	}
+	self := snapshot.operations[fetchOperationSelf]
+	sync := snapshot.operations[fetchOperationRelationshipSync]
+	notes := snapshot.operations[fetchOperationTargetNotes]
+	p.logger.Debug("polling fetch summary",
+		"window", p.settings.PollInterval,
+		"final", final,
+		"outcome", snapshot.outcome(),
+		"attempts", snapshot.attempts(),
+		"failures", snapshot.failures(),
+		"in_flight", snapshot.inFlight(),
+		"self_attempts", self.attempts(),
+		"self_successes", self.successes,
+		"self_failures", self.failures,
+		"relationship_sync_attempts", sync.attempts(),
+		"relationship_sync_successes", sync.successes,
+		"relationship_sync_failures", sync.failures,
+		"target_note_turns_attempts", notes.attempts(),
+		"target_note_turns_successes", notes.successes,
+		"target_note_turns_failures", notes.failures,
+	)
+}
+
+func (p *Poller) acquireSelf(ctx context.Context, summary *fetchSummary) (domain.User, error) {
+	summary.begin(fetchOperationSelf)
+	user, err := p.fetchSelf(ctx)
+	if err == nil && !validID(user.ID) {
+		err = errInvalidResponse
+	}
+	summary.finish(fetchOperationSelf, err, ctx)
+	return user, err
+}
+
+func (p *Poller) syncTargets(ctx context.Context, now time.Time, summary *fetchSummary) ([]string, error) {
+	summary.begin(fetchOperationRelationshipSync)
+	targets, err := p.fetchAndApplyTargets(ctx, now)
+	summary.finish(fetchOperationRelationshipSync, err, ctx)
+	return targets, err
+}
+
+func (p *Poller) runTargetTurn(ctx context.Context, target *targetState, summary *fetchSummary) error {
+	summary.begin(fetchOperationTargetNotes)
+	err := p.processTarget(ctx, target)
+	summary.finish(fetchOperationTargetNotes, err, ctx)
+	return err
 }
 
 // dueTargets returns targets ordered by due time and ID. A stable ID order
@@ -664,6 +918,11 @@ const (
 )
 
 func (p *Poller) fetchAndApplyTargets(ctx context.Context, now time.Time) ([]string, error) {
+	if p.followSynchronizer != nil && !nilFollowerSynchronizer(p.followSynchronizer) {
+		// Do not let the standalone relationship worker act on stale data while
+		// a new complete pair of relationship lists is being acquired.
+		p.followSynchronizer.InvalidateSnapshot()
+	}
 	inbound, err := p.fetchRelationshipIDs(ctx, inboundRelationships)
 	if err != nil {
 		return nil, err
@@ -673,19 +932,14 @@ func (p *Poller) fetchAndApplyTargets(ctx context.Context, now time.Time) ([]str
 		return nil, err
 	}
 
-	outboundSet := make(map[string]struct{}, len(outbound))
-	for _, id := range outbound {
-		outboundSet[id] = struct{}{}
+	// The complete follower set defines note targets. Outbound relationships
+	// are retained separately for the bot-layer reconciliation coordinator.
+	sort.Strings(inbound)
+	p.applyTargetSnapshot(inbound, now)
+	if p.followSynchronizer != nil && !nilFollowerSynchronizer(p.followSynchronizer) {
+		p.followSynchronizer.UpdateSnapshot(p.selfIdentifier(), inbound, outbound)
 	}
-	mutual := make([]string, 0, len(inbound))
-	for _, id := range inbound {
-		if _, present := outboundSet[id]; present {
-			mutual = append(mutual, id)
-		}
-	}
-	sort.Strings(mutual)
-	p.applyTargetSnapshot(mutual, now)
-	return mutual, nil
+	return inbound, nil
 }
 
 func (p *Poller) fetchRelationshipIDs(ctx context.Context, direction relationshipDirection) ([]string, error) {
@@ -1050,6 +1304,23 @@ func (p *Poller) read(ctx context.Context, request func(context.Context) error) 
 		p.limiter.SetCooldown(p.now().Add(delay))
 	}
 	return err
+}
+
+func nilFollowerSynchronizer(synchronizer FollowerSynchronizer) bool {
+	if synchronizer == nil {
+		return true
+	}
+	value := reflect.ValueOf(synchronizer)
+	return (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface || value.Kind() == reflect.Map || value.Kind() == reflect.Func || value.Kind() == reflect.Slice) && value.IsNil()
+}
+
+// NewRateLimiter creates the shared API request limiter used for both polling
+// reads and relationship writes.
+func NewRateLimiter(ratePerSecond float64, burst int) (RateLimiter, error) {
+	if ratePerSecond <= 0 || math.IsNaN(ratePerSecond) || math.IsInf(ratePerSecond, 0) || burst <= 0 {
+		return nil, errors.New("API rate settings must be positive")
+	}
+	return newTokenBucket(ratePerSecond, burst, time.Now, sleepContext), nil
 }
 
 func (p *Poller) nextBackoff(previous time.Duration) time.Duration {

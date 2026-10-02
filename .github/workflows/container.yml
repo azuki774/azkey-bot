@@ -66,6 +66,9 @@ jobs:
           platforms: linux/amd64
           push: false
           tags: azkey-bot-roumu:ci
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -98,5 +101,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE_NAME }}:${{ needs.verify.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

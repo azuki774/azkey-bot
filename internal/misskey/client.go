@@ -160,10 +160,78 @@ func (c *Client) CreateFollow(ctx context.Context, userID string) (domain.User, 
 		return domain.User{}, invalidResponseError()
 	}
 	user, err := response.toDomain()
-	if err != nil {
+	if err != nil || user.ID != userID {
 		return domain.User{}, invalidResponseError()
 	}
 	return user, nil
+}
+
+// DeleteFollow removes the authenticated user's follow relationship to userID.
+func (c *Client) DeleteFollow(ctx context.Context, userID string) (domain.User, error) {
+	if err := validateUserID(userID); err != nil {
+		return domain.User{}, err
+	}
+
+	body, err := c.post(ctx, "following/delete", followRequest{
+		I:      cToken(c),
+		UserID: userID,
+	})
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	var response userDTO
+	if err := decodeJSON(body, &response); err != nil {
+		return domain.User{}, invalidResponseError()
+	}
+	user, err := response.toDomain()
+	if err != nil || user.ID != userID {
+		return domain.User{}, invalidResponseError()
+	}
+	return user, nil
+}
+
+// GetRelations returns relationship state for every requested user ID.
+// Misskey's array response is checked as a complete set; absent, duplicate,
+// unexpected, or incomplete records are invalid rather than false values.
+func (c *Client) GetRelations(ctx context.Context, userIDs []string) ([]domain.Relation, error) {
+	if err := validateRelationIDs(userIDs); err != nil {
+		return nil, err
+	}
+
+	body, err := c.post(ctx, "users/relation", relationsRequest{I: cToken(c), UserID: userIDs})
+	if err != nil {
+		return nil, err
+	}
+
+	var response []relationDTO
+	if err := decodeJSON(body, &response); err != nil || response == nil {
+		return nil, invalidResponseError()
+	}
+	wanted := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		wanted[id] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(response))
+	result := make([]domain.Relation, 0, len(response))
+	for _, item := range response {
+		relation, err := item.toDomain()
+		if err != nil {
+			return nil, invalidResponseError()
+		}
+		if _, ok := wanted[relation.ID]; !ok {
+			return nil, invalidResponseError()
+		}
+		if _, duplicate := seen[relation.ID]; duplicate {
+			return nil, invalidResponseError()
+		}
+		seen[relation.ID] = struct{}{}
+		result = append(result, relation)
+	}
+	if len(seen) != len(wanted) {
+		return nil, invalidResponseError()
+	}
+	return result, nil
 }
 
 // CreateReaction adds reaction to noteID. Reaction deletion is intentionally
@@ -286,8 +354,25 @@ func cToken(c *Client) string {
 }
 
 func validateUserID(userID string) error {
-	if strings.TrimSpace(userID) == "" {
+	if strings.TrimSpace(userID) == "" || userID != strings.TrimSpace(userID) {
 		return invalidArgumentError()
+	}
+	return nil
+}
+
+func validateRelationIDs(userIDs []string) error {
+	if len(userIDs) == 0 {
+		return invalidArgumentError()
+	}
+	seen := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		if err := validateUserID(id); err != nil {
+			return err
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return invalidArgumentError()
+		}
+		seen[id] = struct{}{}
 	}
 	return nil
 }

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"sync/atomic"
 	"time"
 
 	"github.com/azuki774/azkey-bot/internal/domain"
-	"github.com/azuki774/azkey-bot/internal/roumu/polling"
 )
 
 // ReplyClient contains only the API operations used by the inquiry loop.
@@ -21,13 +21,41 @@ type ReplyClient interface {
 	CreateReply(context.Context, domain.Note, string) error
 }
 
+// ReplySettings bounds inquiry polling independently of follower collection.
+type ReplySettings struct {
+	PollInterval    time.Duration
+	PageLimit       int
+	MaxPagesPerTurn int
+	RatePerSecond   float64
+	BackoffBase     time.Duration
+	BackoffMax      time.Duration
+	Clock           func() time.Time
+	Sleep           func(context.Context, time.Duration) error
+	RateLimiter     domain.RequestLimiter
+}
+
+func DefaultReplySettings() ReplySettings {
+	return ReplySettings{
+		PollInterval: time.Minute, PageLimit: 100, MaxPagesPerTurn: 5,
+		RatePerSecond: 2, BackoffBase: time.Second, BackoffMax: 5 * time.Minute,
+		Clock: time.Now, Sleep: sleepFollowContext,
+	}
+}
+
+func (s ReplySettings) Validate() error {
+	if s.PollInterval <= 0 || s.PageLimit < 1 || s.PageLimit > 100 || s.MaxPagesPerTurn < 1 || s.MaxPagesPerTurn > 10_000 || s.RatePerSecond <= 0 || math.IsNaN(s.RatePerSecond) || math.IsInf(s.RatePerSecond, 0) || s.BackoffBase <= 0 || s.BackoffMax < s.BackoffBase || s.Clock == nil || s.Sleep == nil {
+		return errors.New("reply settings are invalid")
+	}
+	return nil
+}
+
 // Replies processes inquiries serially. The cursor advances after every send
 // attempt, including an ambiguous failure: notes/create is not idempotent.
 // Reads may be retried. Cursors and user data are intentionally volatile.
 type Replies struct {
 	client      ReplyClient
 	repository  UserStateRepository
-	settings    polling.Settings
+	settings    ReplySettings
 	logger      *slog.Logger
 	running     atomic.Bool
 	selfID      string
@@ -37,7 +65,7 @@ type Replies struct {
 	nextReply   time.Time
 }
 
-func NewReplies(client ReplyClient, repository UserStateRepository, settings polling.Settings, logger *slog.Logger) (*Replies, error) {
+func NewReplies(client ReplyClient, repository UserStateRepository, settings ReplySettings, logger *slog.Logger) (*Replies, error) {
 	if client == nil || repository == nil {
 		return nil, errors.New("reply client and repository are required")
 	}
@@ -181,6 +209,9 @@ func (r *Replies) handle(ctx context.Context, note domain.Note) error {
 }
 
 func (r *Replies) waitRequest(ctx context.Context) error {
+	if r.settings.RateLimiter != nil {
+		return r.settings.RateLimiter.Wait(ctx)
+	}
 	if err := r.waitUntil(ctx, r.nextRequest); err != nil {
 		return err
 	}
@@ -205,6 +236,9 @@ func (r *Replies) cooldown(err error) {
 		delay = *apiErr.RetryAfter
 	}
 	until := r.settings.Clock().Add(delay)
+	if r.settings.RateLimiter != nil {
+		r.settings.RateLimiter.SetCooldown(until)
+	}
 	if until.After(r.nextRequest) {
 		r.nextRequest = until
 	}

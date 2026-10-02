@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -113,7 +114,7 @@ func TestLoadFromEnvPollingDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("LoadFromEnv returned error: %v", err)
 	}
 	defaults := cfg.Polling()
-	if defaults.PollInterval != time.Minute || defaults.FollowerSyncInterval != 5*time.Minute || defaults.Concurrency != 2 || defaults.RatePerSecond != 2 || defaults.RateBurst != 1 || defaults.PageLimit != 100 || defaults.MaxPagesPerTurn != 5 || defaults.DedupLimit != 10_000 || defaults.DedupTTL != 24*time.Hour || defaults.StartupSpread != time.Minute || defaults.BackoffBase != time.Second || defaults.BackoffMax != 5*time.Minute {
+	if defaults.PollInterval != time.Minute || defaults.FollowerSyncInterval != 10*time.Minute || defaults.FollowWriteInterval != time.Minute || defaults.FollowMaxWritesPerSync != 10 || defaults.Concurrency != 2 || defaults.RatePerSecond != 2 || defaults.RateBurst != 1 || defaults.PageLimit != 100 || defaults.MaxPagesPerTurn != 5 || defaults.DedupLimit != 10_000 || defaults.DedupTTL != 24*time.Hour || defaults.StartupSpread != time.Minute || defaults.BackoffBase != time.Second || defaults.BackoffMax != 5*time.Minute {
 		t.Fatalf("polling defaults = %+v", defaults)
 	}
 
@@ -123,6 +124,8 @@ func TestLoadFromEnvPollingDefaultsAndOverrides(t *testing.T) {
 	}
 	overrides["POLL_INTERVAL"] = "17s"
 	overrides["FOLLOWER_SYNC_INTERVAL"] = "19m"
+	overrides["FOLLOW_WRITE_INTERVAL"] = "75s"
+	overrides["FOLLOW_MAX_WRITES_PER_SYNC"] = "6"
 	overrides["POLL_CONCURRENCY"] = "4"
 	overrides["POLL_RATE_PER_SECOND"] = "3.5"
 	overrides["POLL_RATE_BURST"] = "2"
@@ -138,8 +141,40 @@ func TestLoadFromEnvPollingDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("LoadFromEnv with overrides returned error: %v", err)
 	}
 	got := cfg.Polling()
-	if got.PollInterval != 17*time.Second || got.FollowerSyncInterval != 19*time.Minute || got.Concurrency != 4 || got.RatePerSecond != 3.5 || got.RateBurst != 2 || got.PageLimit != 50 || got.MaxPagesPerTurn != 7 || got.DedupLimit != 123 || got.DedupTTL != 2*time.Hour || got.StartupSpread != 3*time.Second || got.BackoffBase != 2*time.Second || got.BackoffMax != time.Minute {
+	if got.PollInterval != 17*time.Second || got.FollowerSyncInterval != 19*time.Minute || got.FollowWriteInterval != 75*time.Second || got.FollowMaxWritesPerSync != 6 || got.Concurrency != 4 || got.RatePerSecond != 3.5 || got.RateBurst != 2 || got.PageLimit != 50 || got.MaxPagesPerTurn != 7 || got.DedupLimit != 123 || got.DedupTTL != 2*time.Hour || got.StartupSpread != 3*time.Second || got.BackoffBase != 2*time.Second || got.BackoffMax != time.Minute {
 		t.Fatalf("polling overrides = %+v", got)
+	}
+}
+
+func TestParseLogLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  slog.Level
+	}{
+		{name: "default", value: "", want: slog.LevelInfo},
+		{name: "debug", value: "DEBUG", want: slog.LevelDebug},
+		{name: "info", value: " info ", want: slog.LevelInfo},
+		{name: "warn", value: "WARN", want: slog.LevelWarn},
+		{name: "error", value: "ERROR", want: slog.LevelError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ParseLogLevel(test.value)
+			if err != nil {
+				t.Fatalf("ParseLogLevel returned error: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("ParseLogLevel(%q) = %v, want %v", test.value, got, test.want)
+			}
+		})
+	}
+
+	const invalid = "debug-with-private-value"
+	if _, err := ParseLogLevel(invalid); err == nil {
+		t.Fatal("ParseLogLevel accepted an unsupported level")
+	} else if strings.Contains(err.Error(), invalid) {
+		t.Fatalf("error exposed the environment value: %q", err)
 	}
 }
 
@@ -153,6 +188,7 @@ func TestLoadFromEnvRejectsInvalidPollingSettings(t *testing.T) {
 		key   string
 		value string
 	}{
+		{name: "invalid log level", key: "LOG_LEVEL", value: "debug-with-private-value"},
 		{name: "invalid duration", key: "POLL_INTERVAL", value: "soon"},
 		{name: "zero duration", key: "POLL_INTERVAL", value: "0s"},
 		{name: "negative concurrency", key: "POLL_CONCURRENCY", value: "-1"},
@@ -166,6 +202,8 @@ func TestLoadFromEnvRejectsInvalidPollingSettings(t *testing.T) {
 		{name: "dedup upper bound", key: "POLL_DEDUP_LIMIT", value: "1000001"},
 		{name: "negative startup spread", key: "POLL_STARTUP_SPREAD", value: "-1s"},
 		{name: "backoff order", key: "POLL_BACKOFF_MAX", value: "500ms"},
+		{name: "zero follow interval", key: "FOLLOW_WRITE_INTERVAL", value: "0s"},
+		{name: "too many writes", key: "FOLLOW_MAX_WRITES_PER_SYNC", value: "11"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

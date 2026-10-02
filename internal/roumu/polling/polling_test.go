@@ -3,17 +3,20 @@ package polling
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"math"
 	"net/url"
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/azuki774/azkey-bot/internal/domain"
 	"github.com/azuki774/azkey-bot/internal/misskey"
+	followerbot "github.com/azuki774/azkey-bot/internal/roumu/bot"
 )
 
 var (
@@ -658,7 +661,7 @@ func TestAPIErrorAfterSuccessfulPageKeepsPreciseCheckpoint(t *testing.T) {
 	}
 }
 
-func TestMutualTargetSnapshotRequiresCompletePaginationAndSupportsRemovalReadd(t *testing.T) {
+func TestFollowerSnapshotRequiresCompletePaginationAndTracksFollowerChanges(t *testing.T) {
 	client := &fakeClient{self: domain.User{ID: "bot", Username: "bot"}}
 	inboundPage := 0
 	client.followers = func(_ string, options domain.PageOptions) ([]domain.Following, error) {
@@ -694,9 +697,9 @@ func TestMutualTargetSnapshotRequiresCompletePaginationAndSupportsRemovalReadd(t
 	poller.stateMu.Unlock()
 	poller.applyTargetSnapshot([]string{"old"}, testNow)
 	if got, err := poller.fetchAndApplyTargets(context.Background(), testNow); err != nil {
-		t.Fatalf("complete mutual sync returned error: %v", err)
+		t.Fatalf("complete follower sync returned error: %v", err)
 	} else if !reflect.DeepEqual(got, []string{"f1", "f2"}) {
-		t.Fatalf("mutual IDs = %v", got)
+		t.Fatalf("follower IDs = %v", got)
 	}
 	if got := targetIDs(poller); !reflect.DeepEqual(got, []string{"f1", "f2"}) {
 		t.Fatalf("snapshot IDs = %v", got)
@@ -725,8 +728,8 @@ func TestMutualTargetSnapshotRequiresCompletePaginationAndSupportsRemovalReadd(t
 	if _, err := poller.fetchAndApplyTargets(context.Background(), testNow); err != nil {
 		t.Fatalf("valid empty outbound sync returned error: %v", err)
 	}
-	if got := targetIDs(poller); len(got) != 0 {
-		t.Fatalf("empty outbound snapshot IDs = %v", got)
+	if got := targetIDs(poller); !reflect.DeepEqual(got, []string{"f1"}) || targetFor(poller, "f1") != oldF1 {
+		t.Fatalf("empty outbound snapshot changed follower targets = %v", got)
 	}
 
 	client.following = func(_ string, options domain.PageOptions) ([]domain.Following, error) {
@@ -739,12 +742,12 @@ func TestMutualTargetSnapshotRequiresCompletePaginationAndSupportsRemovalReadd(t
 		t.Fatalf("re-add sync returned error: %v", err)
 	}
 	newF1 := targetFor(poller, "f1")
-	if newF1 == nil || newF1 == oldF1 || newF1.initialized {
-		t.Fatalf("re-added target = %+v, old=%p", newF1, oldF1)
+	if newF1 == nil || newF1 != oldF1 {
+		t.Fatalf("outbound follow change replaced follower target = %+v, old=%p", newF1, oldF1)
 	}
 }
 
-func TestMutualTargetIntersectionExcludesUnilateralAndSelfWithDuplicatePages(t *testing.T) {
+func TestFollowerTargetsIncludeInboundOnlyAndExcludeSelfWithDuplicatePages(t *testing.T) {
 	client := &fakeClient{self: domain.User{ID: "bot"}}
 	client.followers = func(_ string, options domain.PageOptions) ([]domain.Following, error) {
 		switch options.UntilID {
@@ -785,16 +788,27 @@ func TestMutualTargetIntersectionExcludesUnilateralAndSelfWithDuplicatePages(t *
 		}
 	}
 	poller := newTestPoller(t, client, nil)
+	synchronizer := &recordingFollowerSynchronizer{}
+	poller.followSynchronizer = synchronizer
 	poller.stateMu.Lock()
 	poller.selfID = "bot"
 	poller.stateMu.Unlock()
 
 	got, err := poller.fetchAndApplyTargets(context.Background(), testNow)
 	if err != nil {
-		t.Fatalf("mutual sync returned error: %v", err)
+		t.Fatalf("follower sync returned error: %v", err)
 	}
-	if !reflect.DeepEqual(got, []string{"mutual"}) || !reflect.DeepEqual(targetIDs(poller), []string{"mutual"}) {
-		t.Fatalf("mutual intersection = %v, targets = %v", got, targetIDs(poller))
+	want := []string{"in-only", "in-other", "mutual"}
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(targetIDs(poller), want) {
+		t.Fatalf("follower IDs = %v, targets = %v, want %v", got, targetIDs(poller), want)
+	}
+	if updates := synchronizer.snapshots(); len(updates) != 1 || updates[0].selfID != "bot" ||
+		!reflect.DeepEqual(updates[0].followers, want) ||
+		!reflect.DeepEqual(updates[0].following, []string{"mutual", "out-only", "out-other"}) {
+		t.Fatalf("relationship snapshots = %+v, want exact inbound/outbound IDs", updates)
+	}
+	if synchronizer.invalidateCount() != 1 {
+		t.Fatalf("snapshot invalidations = %d, want one before refresh", synchronizer.invalidateCount())
 	}
 }
 
@@ -813,6 +827,8 @@ func TestMutualTargetSnapshotPreservesPreviousTargetsWhenEitherDirectionFails(t 
 		return []domain.Following{}, nil
 	}
 	poller := newTestPoller(t, client, nil)
+	synchronizer := &recordingFollowerSynchronizer{}
+	poller.followSynchronizer = synchronizer
 	poller.stateMu.Lock()
 	poller.selfID = "bot"
 	poller.stateMu.Unlock()
@@ -845,6 +861,105 @@ func TestMutualTargetSnapshotPreservesPreviousTargetsWhenEitherDirectionFails(t 
 	}
 	if got := targetIDs(poller); !reflect.DeepEqual(got, []string{"mutual"}) || targetFor(poller, "mutual") != previous {
 		t.Fatalf("outbound failure replaced snapshot: IDs=%v target=%p previous=%p", got, targetFor(poller, "mutual"), previous)
+	}
+	if updates := synchronizer.snapshots(); len(updates) != 1 {
+		t.Fatalf("failed refresh published a relationship snapshot: %+v", updates)
+	}
+	if synchronizer.invalidateCount() != 3 {
+		t.Fatalf("snapshot invalidations = %d, want initial, inbound-failed, and outbound-failed refreshes", synchronizer.invalidateCount())
+	}
+}
+
+func TestFailedRelationshipRefreshInvalidatesPendingFollowWork(t *testing.T) {
+	relationEntered := make(chan struct{})
+	relationCanceled := make(chan struct{})
+	listingStarted := make(chan struct{})
+	releaseListing := make(chan struct{})
+	var listingOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseListing) }) }
+	defer release()
+	client := &blockingFollowerClient{
+		fakeClient: &fakeClient{
+			self: domain.User{ID: "bot"},
+			followers: func(string, domain.PageOptions) ([]domain.Following, error) {
+				listingOnce.Do(func() { close(listingStarted) })
+				<-releaseListing
+				return nil, errTestAPI
+			},
+		},
+		relationEntered:  relationEntered,
+		relationCanceled: relationCanceled,
+	}
+	poller := newTestPoller(t, client, nil)
+	poller.stateMu.Lock()
+	poller.selfID = "bot"
+	poller.stateMu.Unlock()
+	poller.applyTargetSnapshot([]string{"follower"}, testNow)
+	previousTarget := targetFor(poller, "follower")
+
+	settings := followerbot.DefaultFollowSyncSettings()
+	settings.WriteInterval = time.Millisecond
+	synchronizer, err := followerbot.NewFollowerSynchronizer(client, poller.limiter, settings, nil)
+	if err != nil {
+		t.Fatalf("NewFollowerSynchronizer: %v", err)
+	}
+	synchronizer.UpdateSnapshot("bot", []string{"follower"}, nil)
+	poller.followSynchronizer = synchronizer
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() { runDone <- synchronizer.Run(runCtx) }()
+	select {
+	case <-relationEntered:
+	case <-time.After(time.Second):
+		cancelRun()
+		t.Fatal("relationship worker did not start its pending relation request")
+	}
+
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, refreshErr := poller.fetchAndApplyTargets(context.Background(), testNow)
+		refreshDone <- refreshErr
+	}()
+	select {
+	case <-listingStarted:
+	case <-time.After(time.Second):
+		release()
+		cancelRun()
+		t.Fatal("polling refresh did not start listing followers")
+	}
+	select {
+	case <-relationCanceled:
+	case <-time.After(time.Second):
+		release()
+		cancelRun()
+		t.Fatal("refresh did not cancel the in-flight relation request")
+	}
+	if writes := client.writeCalls(); len(writes) != 0 {
+		t.Fatalf("relationship writes occurred during refresh: %v", writes)
+	}
+
+	release()
+	if err := <-refreshDone; !errors.Is(err, errTestAPI) {
+		t.Fatalf("refresh error = %v, want %v", err, errTestAPI)
+	}
+	if writes := client.writeCalls(); len(writes) != 0 {
+		t.Fatalf("relationship writes occurred after failed refresh: %v", writes)
+	}
+	if targetFor(poller, "follower") != previousTarget {
+		t.Fatal("failed relationship refresh replaced the monitored follower target")
+	}
+
+	cancelRun()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("FollowerSynchronizer.Run returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relationship worker did not stop after cancellation")
 	}
 }
 
@@ -934,7 +1049,7 @@ func TestMutualTargetSnapshotRejectsMalformedOutboundRelationships(t *testing.T)
 	}
 }
 
-func TestMutualTargetLossAndReadditionOnEitherSideResetsBaseline(t *testing.T) {
+func TestFollowerLossAndReadditionResetsBaselineRegardlessOfOutboundState(t *testing.T) {
 	inboundPresent := true
 	outboundPresent := true
 	client := &fakeClient{self: domain.User{ID: "bot"}}
@@ -983,22 +1098,24 @@ func TestMutualTargetLossAndReadditionOnEitherSideResetsBaseline(t *testing.T) {
 	if _, err := poller.fetchAndApplyTargets(context.Background(), testNow); err != nil {
 		t.Fatalf("outbound loss sync returned error: %v", err)
 	}
-	if targetFor(poller, "mutual") != nil {
-		t.Fatal("outbound loss kept the target")
+	if targetFor(poller, "mutual") != second {
+		t.Fatal("outbound loss removed a current follower target")
 	}
 	outboundPresent = true
 	if _, err := poller.fetchAndApplyTargets(context.Background(), testNow); err != nil {
 		t.Fatalf("outbound re-add sync returned error: %v", err)
 	}
 	third := targetFor(poller, "mutual")
-	if third == nil || third == second || third.initialized {
-		t.Fatalf("outbound re-add target = %+v, old=%p", third, second)
+	if third == nil || third != second {
+		t.Fatalf("outbound re-add replaced follower target = %+v, previous=%p", third, second)
 	}
 }
 
 func TestFollowerMalformedOrStuckPaginationPreservesSnapshot(t *testing.T) {
 	client := &fakeClient{self: domain.User{ID: "bot", Username: "bot"}}
 	poller := newTestPoller(t, client, nil)
+	synchronizer := &recordingFollowerSynchronizer{}
+	poller.followSynchronizer = synchronizer
 	poller.stateMu.Lock()
 	poller.selfID = "bot"
 	poller.stateMu.Unlock()
@@ -1025,6 +1142,12 @@ func TestFollowerMalformedOrStuckPaginationPreservesSnapshot(t *testing.T) {
 	}
 	if got := targetIDs(poller); !reflect.DeepEqual(got, []string{"old"}) {
 		t.Fatalf("malformed sync changed snapshot = %v", got)
+	}
+	if updates := synchronizer.snapshots(); len(updates) != 0 {
+		t.Fatalf("incomplete listing published relationship snapshots: %+v", updates)
+	}
+	if synchronizer.invalidateCount() != 2 {
+		t.Fatalf("incomplete listing invalidations = %d, want one for each attempt", synchronizer.invalidateCount())
 	}
 }
 
@@ -1233,7 +1356,7 @@ func TestRunSchedulesTargetsFairlyAndStopsOnCancellation(t *testing.T) {
 	}
 }
 
-func TestRunOnlyPollsMutualTargets(t *testing.T) {
+func TestRunPollsAllFollowersIncludingInboundOnly(t *testing.T) {
 	client := &fakeClient{self: domain.User{ID: "bot"}}
 	client.followers = func(_ string, options domain.PageOptions) ([]domain.Following, error) {
 		if options.UntilID == "" {
@@ -1278,8 +1401,8 @@ func TestRunOnlyPollsMutualTargets(t *testing.T) {
 	polledMu.Lock()
 	got := append([]string(nil), polled...)
 	polledMu.Unlock()
-	if !reflect.DeepEqual(got, []string{"mutual"}) {
-		t.Fatalf("polled users = %v, want only mutual target", got)
+	if !reflect.DeepEqual(got, []string{"in-only", "mutual"}) {
+		t.Fatalf("polled users = %v, want all followers", got)
 	}
 }
 
@@ -1467,6 +1590,271 @@ func TestRunCanBeStartedAgainAfterCancellation(t *testing.T) {
 	}
 }
 
+func TestFetchSummarySeparatesSuccessFailureIdleAndCancellation(t *testing.T) {
+	summary := newFetchSummary()
+	summary.begin(fetchOperationSelf)
+	summary.finish(fetchOperationSelf, nil, context.Background())
+	summary.begin(fetchOperationRelationshipSync)
+	summary.finish(fetchOperationRelationshipSync, errTestAPI, context.Background())
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	summary.begin(fetchOperationTargetNotes)
+	summary.finish(fetchOperationTargetNotes, context.Canceled, canceled)
+	summary.begin(fetchOperationTargetNotes)
+	summary.finish(fetchOperationTargetNotes, errTargetGone, context.Background())
+
+	snapshot := summary.take()
+	if snapshot.outcome() != "partial_failure" || snapshot.attempts() != 2 || snapshot.failures() != 1 || snapshot.inFlight() != 0 {
+		t.Fatalf("summary outcome=%q attempts=%d failures=%d in-flight=%d", snapshot.outcome(), snapshot.attempts(), snapshot.failures(), snapshot.inFlight())
+	}
+	if got := snapshot.operations[fetchOperationSelf]; got.attempts() != 1 || got.successes != 1 || got.failures != 0 {
+		t.Fatalf("self counts = %+v", got)
+	}
+	if got := snapshot.operations[fetchOperationRelationshipSync]; got.attempts() != 1 || got.successes != 0 || got.failures != 1 {
+		t.Fatalf("relationship counts = %+v", got)
+	}
+	if got := snapshot.operations[fetchOperationTargetNotes]; got.attempts() != 0 || got.inFlight != 0 {
+		t.Fatalf("canceled/removed target counts = %+v", got)
+	}
+	if got := summary.take(); got.outcome() != "idle" || got.attempts() != 0 {
+		t.Fatalf("empty next window outcome=%q attempts=%d, want idle", got.outcome(), got.attempts())
+	}
+}
+
+func TestFetchSummaryReportsInFlightInsteadOfFalseSuccess(t *testing.T) {
+	summary := newFetchSummary()
+	summary.begin(fetchOperationTargetNotes)
+	snapshot := summary.take()
+	if snapshot.outcome() != "in_progress" || snapshot.attempts() != 0 || snapshot.inFlight() != 1 {
+		t.Fatalf("in-progress summary outcome=%q attempts=%d in-flight=%d", snapshot.outcome(), snapshot.attempts(), snapshot.inFlight())
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	summary.finish(fetchOperationTargetNotes, context.Canceled, canceled)
+	if got := summary.take(); got.outcome() != "idle" || got.inFlight() != 0 {
+		t.Fatalf("canceled window outcome=%q in-flight=%d, want idle and no failures", got.outcome(), got.inFlight())
+	}
+}
+
+func TestTargetNoteTurnCountsMultiplePagesOnce(t *testing.T) {
+	client := &fakeClient{
+		self: domain.User{ID: "bot"},
+		notes: func(_ string, options domain.NotePageOptions) ([]domain.Note, error) {
+			switch options.SinceID {
+			case "n0":
+				return []domain.Note{testNote("n1", "follower", "public", testNow)}, nil
+			case "n1":
+				return []domain.Note{testNote("n2", "follower", "public", testNow)}, nil
+			case "n2":
+				return []domain.Note{}, nil
+			default:
+				return nil, errors.New("unexpected cursor")
+			}
+		},
+	}
+	poller := newTestPoller(t, client, nil)
+	target := addTarget(t, poller, "follower")
+	target.initialized = true
+	target.cursor = "n0"
+	summary := newFetchSummary()
+
+	if err := poller.runTargetTurn(context.Background(), target, summary); err != nil {
+		t.Fatalf("runTargetTurn returned error: %v", err)
+	}
+	if got := client.noteCallCount(); got != 3 {
+		t.Fatalf("note page requests = %d, want 3", got)
+	}
+	counts := summary.take().operations[fetchOperationTargetNotes]
+	if counts.attempts() != 1 || counts.successes != 1 || counts.failures != 0 {
+		t.Fatalf("target turn counts = %+v, want one successful turn", counts)
+	}
+}
+
+func TestRelationshipSyncCountsCompletePaginatedAttemptOnce(t *testing.T) {
+	client := &fakeClient{self: domain.User{ID: "bot"}}
+	client.followers = func(_ string, options domain.PageOptions) ([]domain.Following, error) {
+		if options.UntilID == "" {
+			return []domain.Following{testFollowing("r2", "f2", "bot"), testFollowing("r1", "f1", "bot")}, nil
+		}
+		return []domain.Following{}, nil
+	}
+	client.following = func(_ string, options domain.PageOptions) ([]domain.Following, error) {
+		if options.UntilID == "" {
+			return []domain.Following{testFollowing("o2", "bot", "f2"), testFollowing("o1", "bot", "f1")}, nil
+		}
+		return []domain.Following{}, nil
+	}
+	poller := newTestPoller(t, client, nil)
+	poller.stateMu.Lock()
+	poller.selfID = "bot"
+	poller.stateMu.Unlock()
+	summary := newFetchSummary()
+
+	if _, err := poller.syncTargets(context.Background(), testNow, summary); err != nil {
+		t.Fatalf("syncTargets returned error: %v", err)
+	}
+	counts := summary.take().operations[fetchOperationRelationshipSync]
+	if counts.attempts() != 1 || counts.successes != 1 || counts.failures != 0 {
+		t.Fatalf("relationship sync counts = %+v, want one successful sync", counts)
+	}
+}
+
+func TestFetchSummaryLoggingUsesDebugLevelAndIncludesIdleOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		level     slog.Level
+		wantEvent bool
+	}{
+		{name: "info suppresses", level: slog.LevelInfo},
+		{name: "debug emits", level: slog.LevelDebug, wantEvent: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var lines []string
+			logger := slog.New(slog.NewTextHandler(&lineWriter{lines: &lines}, &slog.HandlerOptions{Level: test.level}))
+			poller := &Poller{logger: logger, settings: DefaultSettings()}
+			poller.logFetchSummary(fetchSummarySnapshot{}, false)
+			if (len(lines) != 0) != test.wantEvent {
+				t.Fatalf("summary lines = %q, want event=%t", lines, test.wantEvent)
+			}
+			if test.wantEvent && (!strings.Contains(lines[0], "outcome=idle") || !strings.Contains(lines[0], "attempts=0") || strings.Contains(lines[0], "target_id")) {
+				t.Fatalf("debug summary = %q", lines[0])
+			}
+		})
+	}
+}
+
+func TestRunSummaryFlushesFatalFailureAndIsLifecycleScoped(t *testing.T) {
+	authErr := domain.NewError(domain.ErrorKindAuth, 401, "UNAUTHORIZED", nil)
+	client := &fakeClient{
+		self:       domain.User{ID: "bot"},
+		selfErrors: []error{authErr},
+	}
+	var lines []string
+	logger := slog.New(slog.NewTextHandler(&lineWriter{lines: &lines}, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	poller := newTestPoller(t, client, nil)
+	poller.logger = logger
+
+	if err := poller.Run(context.Background()); !errors.Is(err, authErr) {
+		t.Fatalf("first Run error = %v, want %v", err, authErr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	poller.settings.Sleep = func(context.Context, time.Duration) error {
+		cancel()
+		return context.Canceled
+	}
+	if err := poller.Run(ctx); err != nil {
+		t.Fatalf("second Run error = %v", err)
+	}
+	cancel()
+
+	if len(lines) != 2 {
+		t.Fatalf("summary lines = %q, want one final summary per lifecycle", lines)
+	}
+	if !strings.Contains(lines[0], "outcome=failure") || !strings.Contains(lines[0], "self_attempts=1") || !strings.Contains(lines[0], "self_failures=1") {
+		t.Fatalf("fatal lifecycle summary = %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "outcome=success") || !strings.Contains(lines[1], "self_attempts=1") || !strings.Contains(lines[1], "self_successes=1") || !strings.Contains(lines[1], "relationship_sync_attempts=1") || !strings.Contains(lines[1], "relationship_sync_successes=1") || strings.Contains(lines[1], "self_failures=1") {
+		t.Fatalf("restarted lifecycle summary = %q", lines[1])
+	}
+}
+
+type followerSnapshot struct {
+	selfID    string
+	followers []string
+	following []string
+}
+
+type recordingFollowerSynchronizer struct {
+	mu            sync.Mutex
+	invalidations int
+	updates       []followerSnapshot
+}
+
+func (s *recordingFollowerSynchronizer) Run(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (s *recordingFollowerSynchronizer) InvalidateSnapshot() {
+	s.mu.Lock()
+	s.invalidations++
+	s.mu.Unlock()
+}
+
+func (s *recordingFollowerSynchronizer) UpdateSnapshot(selfID string, followerIDs, followingIDs []string) {
+	s.mu.Lock()
+	s.updates = append(s.updates, followerSnapshot{
+		selfID:    selfID,
+		followers: append([]string(nil), followerIDs...),
+		following: append([]string(nil), followingIDs...),
+	})
+	s.mu.Unlock()
+}
+
+func (s *recordingFollowerSynchronizer) snapshots() []followerSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]followerSnapshot(nil), s.updates...)
+}
+
+func (s *recordingFollowerSynchronizer) invalidateCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.invalidations
+}
+
+type blockingFollowerClient struct {
+	*fakeClient
+	relationEntered  chan struct{}
+	relationCanceled chan struct{}
+	relationOnce     sync.Once
+	mu               sync.Mutex
+	writes           []string
+}
+
+func (c *blockingFollowerClient) GetRelations(ctx context.Context, ids []string) ([]domain.Relation, error) {
+	if len(ids) != 1 {
+		return nil, errInvalidResponse
+	}
+	c.relationOnce.Do(func() {
+		close(c.relationEntered)
+		<-ctx.Done()
+		close(c.relationCanceled)
+	})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []domain.Relation{{ID: ids[0], IsFollowed: true}}, nil
+}
+
+func (c *blockingFollowerClient) CreateFollow(ctx context.Context, id string) (domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	c.mu.Lock()
+	c.writes = append(c.writes, "follow:"+id)
+	c.mu.Unlock()
+	return domain.User{ID: id}, nil
+}
+
+func (c *blockingFollowerClient) DeleteFollow(ctx context.Context, id string) (domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	c.mu.Lock()
+	c.writes = append(c.writes, "unfollow:"+id)
+	c.mu.Unlock()
+	return domain.User{ID: id}, nil
+}
+
+func (c *blockingFollowerClient) writeCalls() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.writes...)
+}
+
 type fakeClient struct {
 	mu         sync.Mutex
 	self       domain.User
@@ -1621,6 +2009,18 @@ func testNote(id, userID, visibility string, createdAt time.Time) domain.Note {
 
 func testFollowing(id, followerID, followeeID string) domain.Following {
 	return domain.Following{ID: id, FollowerID: followerID, FolloweeID: followeeID}
+}
+
+type lineWriter struct {
+	mu    sync.Mutex
+	lines *[]string
+}
+
+func (w *lineWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	*w.lines = append(*w.lines, string(data))
+	return len(data), nil
 }
 
 func mustBaseURL(t *testing.T) *url.URL {

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/azuki774/azkey-bot/internal/domain"
-	"github.com/azuki774/azkey-bot/internal/roumu/polling"
 	"github.com/azuki774/azkey-bot/internal/roumu/repository/memory"
 )
 
@@ -51,7 +50,7 @@ func inquiry(id string) domain.Note {
 func replyFixture(t *testing.T, f *replyFake, repo UserStateRepository) *Replies {
 	t.Helper()
 	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
-	s := polling.DefaultSettings()
+	s := DefaultReplySettings()
 	s.Clock = func() time.Time { return now }
 	s.Sleep = func(ctx context.Context, d time.Duration) error { now = now.Add(d); return ctx.Err() }
 	s.PageLimit = 1
@@ -175,5 +174,48 @@ func TestRepliesStorageFailureAndCooldown(t *testing.T) {
 	cancel()
 	if err := r.waitRequest(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
+	}
+}
+
+type replyLimiter struct {
+	waits    int
+	cooldown time.Time
+	err      error
+}
+
+func (l *replyLimiter) Wait(ctx context.Context) error {
+	l.waits++
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return l.err
+}
+
+func (l *replyLimiter) SetCooldown(until time.Time) { l.cooldown = until }
+
+func TestRepliesUseSharedLimiterForReadsWritesAndCooldown(t *testing.T) {
+	f := &replyFake{member: true, notes: []domain.Note{inquiry("01")}}
+	r := replyFixture(t, f, &memory.Users{})
+	limiter := &replyLimiter{}
+	r.settings.RateLimiter = limiter
+	delay := 10 * time.Minute
+	f.sendErr = domain.NewError(domain.ErrorKindRateLimit, 429, "", &delay)
+	if err := r.poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Mentions page, relation read, reply write, and the final empty page.
+	if limiter.waits != 4 {
+		t.Fatalf("limiter waits = %d", limiter.waits)
+	}
+	if limiter.cooldown.Sub(r.settings.Clock()) != delay {
+		t.Fatal("reply cooldown was not shared")
+	}
+	blocked := errors.New("limiter unavailable")
+	limiter.err = blocked
+	if err := r.poll(context.Background()); !errors.Is(err, blocked) {
+		t.Fatalf("limiter failure: %v", err)
+	}
+	if len(f.sent) != 1 {
+		t.Fatal("blocked request sent a reply")
 	}
 }

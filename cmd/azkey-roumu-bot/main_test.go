@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -26,8 +28,10 @@ type logCapture struct {
 	output      bytes.Buffer
 	started     chan struct{}
 	stopped     chan struct{}
+	summary     chan struct{}
 	startedOnce sync.Once
 	stoppedOnce sync.Once
+	summaryOnce sync.Once
 }
 
 func TestRunRepliesWithoutModeConfiguration(t *testing.T) {
@@ -44,6 +48,8 @@ func TestRunRepliesWithoutModeConfiguration(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/i":
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "bot", "username": "bot"})
+		case "/api/users/followers", "/api/users/following":
+			_ = json.NewEncoder(w).Encode([]any{})
 		case "/api/notes/mentions":
 			if request["sinceDate"] == nil {
 				t.Error("missing startup baseline")
@@ -82,6 +88,7 @@ func newLogCapture() *logCapture {
 	return &logCapture{
 		started: make(chan struct{}),
 		stopped: make(chan struct{}),
+		summary: make(chan struct{}),
 	}
 }
 
@@ -96,6 +103,10 @@ func (c *logCapture) Write(data []byte) (int, error) {
 	}
 	if strings.Contains(rendered, `msg="azkey-roumu-bot stopped"`) {
 		c.stoppedOnce.Do(func() { close(c.stopped) })
+	}
+	// Initial reads may finish in different summary windows.
+	if strings.Contains(rendered, `msg="polling fetch summary"`) && strings.Contains(rendered, "relationship_sync_successes=1") {
+		c.summaryOnce.Do(func() { close(c.summary) })
 	}
 	return len(data), nil
 }
@@ -119,7 +130,7 @@ func TestRunStartsAndStopsOnContextCancellationWithEnvironmentOnlyConfig(t *test
 	done := make(chan error, 1)
 
 	go func() {
-		done <- runWithClientFactory(ctx, mainMapLookup(env), logger, func(*url.URL, string) (bot.ReplyClient, error) {
+		done <- runWithClientFactory(ctx, mainMapLookup(env), logger, func(*url.URL, string) (applicationClient, error) {
 			return mainTestClient{}, nil
 		})
 	}()
@@ -151,6 +162,63 @@ func TestRunStartsAndStopsOnContextCancellationWithEnvironmentOnlyConfig(t *test
 	}
 }
 
+func TestRunPerformsRepliesAndFollowSynchronizationAtStartup(t *testing.T) {
+	client := newMainObserveClient()
+	env := map[string]string{
+		"MISSKEY_BASE_URL":       "https://misskey.example.test",
+		"MISSKEY_TOKEN":          "follow-sync-test-token",
+		"POLL_RATE_PER_SECOND":   "1000",
+		"POLL_STARTUP_SPREAD":    "0s",
+		"FOLLOW_WRITE_INTERVAL":  "1ms",
+		"POLL_BACKOFF_BASE":      "1ms",
+		"POLL_BACKOFF_MAX":       "1s",
+		"POLL_INTERVAL":          "1h",
+		"FOLLOWER_SYNC_INTERVAL": "1h",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runWithClientFactory(ctx, mainMapLookup(env), nil, func(*url.URL, string) (applicationClient, error) {
+			return client, nil
+		})
+	}()
+
+	gotFollow := false
+	gotUnfollow := false
+	gotReply := false
+	deadline := time.After(5 * time.Second)
+	for !gotFollow || !gotUnfollow || !gotReply {
+		select {
+		case <-client.followCalls:
+			gotFollow = true
+		case <-client.unfollowCalls:
+			gotUnfollow = true
+		case <-client.replyCalls:
+			gotReply = true
+		case err := <-runDone:
+			if err != nil {
+				t.Fatalf("runWithClientFactory returned before relationship writes: %v", err)
+			}
+			t.Fatal("runWithClientFactory stopped before both relationship writes")
+		case <-deadline:
+			t.Fatalf("startup actions: follow=%t unfollow=%t reply=%t", gotFollow, gotUnfollow, gotReply)
+		}
+	}
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("runWithClientFactory returned error after cancellation: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runWithClientFactory did not stop after cancellation")
+	}
+	if got := client.relationshipWrites(); !reflect.DeepEqual(got, []string{"follow:follower", "unfollow:followee"}) && !reflect.DeepEqual(got, []string{"unfollow:followee", "follow:follower"}) {
+		t.Fatalf("relationship writes = %v, want one inbound follow and one outbound unfollow", got)
+	}
+}
+
 func TestRunRejectsInvalidConfigBeforeStartup(t *testing.T) {
 	secret := "invalid-config-test-secret"
 	env := map[string]string{
@@ -179,7 +247,7 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/i":
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "bot-id", "username": "bot", "name": nil, "host": nil})
-		case "/api/notes/mentions":
+		case "/api/notes/mentions", "/api/users/followers", "/api/users/following":
 			_ = json.NewEncoder(w).Encode([]any{})
 		default:
 			http.NotFound(w, r)
@@ -187,8 +255,11 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	}))
 	defer server.Close()
 	validEnv := map[string]string{
-		"MISSKEY_BASE_URL": server.URL,
-		"MISSKEY_TOKEN":    secret,
+		"MISSKEY_BASE_URL":     server.URL,
+		"MISSKEY_TOKEN":        secret,
+		"LOG_LEVEL":            "DEBUG",
+		"POLL_INTERVAL":        "10ms",
+		"POLL_RATE_PER_SECOND": "1000",
 	}
 
 	cmd := exec.Command(binary)
@@ -222,6 +293,11 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("CLI did not report startup")
 	}
+	select {
+	case <-capture.summary:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("CLI did not emit a debug polling summary: %s", capture.String())
+	}
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("send SIGTERM: %v", err)
@@ -248,6 +324,9 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 	outputText := capture.String() + stdout.String()
 	if strings.Contains(outputText, secret) {
 		t.Fatalf("captured CLI output contains token: %q", outputText)
+	}
+	if !strings.Contains(outputText, `msg="polling fetch summary"`) || !strings.Contains(outputText, "self_successes=1") || !strings.Contains(outputText, "relationship_sync_successes=1") {
+		t.Fatalf("debug logging did not include the completed fetch summary: %q", outputText)
 	}
 
 	invalidSecret := "cli-invalid-config-secret"
@@ -293,6 +372,178 @@ func (mainTestClient) IsFollowing(context.Context, string) (bool, error) {
 
 func (mainTestClient) CreateReply(context.Context, domain.Note, string) error {
 	return nil
+}
+
+func (mainTestClient) ListFollowers(context.Context, string, domain.PageOptions) ([]domain.Following, error) {
+	return []domain.Following{}, nil
+}
+
+func (mainTestClient) ListFollowing(context.Context, string, domain.PageOptions) ([]domain.Following, error) {
+	return []domain.Following{}, nil
+}
+
+func (mainTestClient) ListUserNotes(context.Context, string, domain.NotePageOptions) ([]domain.Note, error) {
+	return []domain.Note{}, nil
+}
+
+func (mainTestClient) GetRelations(context.Context, []string) ([]domain.Relation, error) {
+	return []domain.Relation{}, nil
+}
+
+func (mainTestClient) CreateFollow(context.Context, string) (domain.User, error) {
+	return domain.User{}, nil
+}
+
+func (mainTestClient) DeleteFollow(context.Context, string) (domain.User, error) {
+	return domain.User{}, nil
+}
+
+type mainObserveClient struct {
+	mainTestClient
+	replyCalls    chan string
+	mu            sync.Mutex
+	relations     map[string]domain.Relation
+	writes        []string
+	followCalls   chan string
+	unfollowCalls chan string
+}
+
+func newMainObserveClient() *mainObserveClient {
+	return &mainObserveClient{
+		replyCalls: make(chan string, 1),
+		relations: map[string]domain.Relation{
+			"follower": {ID: "follower", IsFollowed: true},
+			"followee": {ID: "followee", IsFollowing: true},
+		},
+		followCalls:   make(chan string, 1),
+		unfollowCalls: make(chan string, 1),
+	}
+}
+
+func (c *mainObserveClient) Self(ctx context.Context) (domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	return domain.User{ID: "bot"}, nil
+}
+
+func (c *mainObserveClient) ListMentions(ctx context.Context, options domain.NotePageOptions) ([]domain.Note, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if options.SinceID != "" {
+		return []domain.Note{}, nil
+	}
+	return []domain.Note{{ID: "inquiry", UserID: "visitor", User: &domain.User{ID: "visitor"}, Visibility: "public", ReplyID: "parent", ReplyUserID: "bot"}}, nil
+}
+
+func (c *mainObserveClient) CreateReply(ctx context.Context, note domain.Note, text string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.replyCalls <- note.ID
+	return nil
+}
+
+type testConsumerFunc func(context.Context) error
+
+func (f testConsumerFunc) Run(ctx context.Context) error { return f(ctx) }
+
+func TestConsumerGroupCancelsAndJoinsSiblingOnFailure(t *testing.T) {
+	failure := errors.New("consumer failed")
+	siblingStopped := make(chan struct{})
+	group := consumerGroup{
+		testConsumerFunc(func(context.Context) error { return failure }),
+		testConsumerFunc(func(ctx context.Context) error {
+			<-ctx.Done()
+			close(siblingStopped)
+			return ctx.Err()
+		}),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	runner, err := bot.NewRunner(group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx); !errors.Is(err, failure) {
+		t.Fatalf("Run: %v", err)
+	}
+	select {
+	case <-siblingStopped:
+	default:
+		t.Fatal("sibling not joined")
+	}
+}
+
+func (c *mainObserveClient) ListFollowers(ctx context.Context, _ string, options domain.PageOptions) ([]domain.Following, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if options.UntilID != "" {
+		return []domain.Following{}, nil
+	}
+	return []domain.Following{{ID: "inbound-relation", FollowerID: "follower", FolloweeID: "bot"}}, nil
+}
+
+func (c *mainObserveClient) ListFollowing(ctx context.Context, _ string, options domain.PageOptions) ([]domain.Following, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if options.UntilID != "" {
+		return []domain.Following{}, nil
+	}
+	return []domain.Following{{ID: "outbound-relation", FollowerID: "bot", FolloweeID: "followee"}}, nil
+}
+
+func (c *mainObserveClient) ListUserNotes(ctx context.Context, _ string, _ domain.NotePageOptions) ([]domain.Note, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []domain.Note{}, nil
+}
+
+func (c *mainObserveClient) GetRelations(ctx context.Context, ids []string) ([]domain.Relation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	relations := make([]domain.Relation, 0, len(ids))
+	for _, id := range ids {
+		relations = append(relations, c.relations[id])
+	}
+	return relations, nil
+}
+
+func (c *mainObserveClient) CreateFollow(ctx context.Context, id string) (domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	c.mu.Lock()
+	c.writes = append(c.writes, "follow:"+id)
+	c.relations[id] = domain.Relation{ID: id, IsFollowing: true, IsFollowed: true}
+	c.mu.Unlock()
+	c.followCalls <- id
+	return domain.User{ID: id}, nil
+}
+
+func (c *mainObserveClient) DeleteFollow(ctx context.Context, id string) (domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	c.mu.Lock()
+	c.writes = append(c.writes, "unfollow:"+id)
+	c.relations[id] = domain.Relation{ID: id}
+	c.mu.Unlock()
+	c.unfollowCalls <- id
+	return domain.User{ID: id}, nil
+}
+
+func (c *mainObserveClient) relationshipWrites() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.writes...)
 }
 
 func buildCLI(t *testing.T) string {
