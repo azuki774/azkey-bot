@@ -203,24 +203,6 @@ func (f NoteHandlerFunc) HandleNote(ctx context.Context, note domain.Note) error
 	return f(ctx, note)
 }
 
-// ObservationHandler is the only handler wired by the current command. It
-// records note and author IDs without note contents and intentionally performs
-// no Misskey write. Business reaction processing belongs to issue #10.
-type ObservationHandler struct {
-	Logger *slog.Logger
-}
-
-// HandleNote logs an observation and treats it as successfully observed.
-func (h ObservationHandler) HandleNote(ctx context.Context, note domain.Note) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if h.Logger != nil {
-		h.Logger.Info("observed target note", "note_id", note.ID, "user_id", note.UserID)
-	}
-	return nil
-}
-
 // Client is the read-only Misskey view required by Poller. It intentionally
 // excludes follow/reaction operations.
 type Client interface {

@@ -3,13 +3,11 @@ package polling
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"math"
 	"net/url"
 	"reflect"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +27,7 @@ func TestRunReturnsAfterCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
-	poller, err := New(client, ObservationHandler{})
+	poller, err := New(client, NoteHandlerFunc(func(ctx context.Context, _ domain.Note) error { return ctx.Err() }))
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -1469,22 +1467,6 @@ func TestRunCanBeStartedAgainAfterCancellation(t *testing.T) {
 	}
 }
 
-func TestObservationHandlerDoesNotExposeNoteText(t *testing.T) {
-	var logLines []string
-	logger := testLogger(&logLines)
-	handler := ObservationHandler{Logger: logger}
-	text := "private note content that must not be logged"
-	if err := handler.HandleNote(context.Background(), domain.Note{ID: "n1", UserID: "f1", Text: &text}); err != nil {
-		t.Fatalf("HandleNote returned error: %v", err)
-	}
-	if len(logLines) != 1 || !strings.Contains(logLines[0], "n1") {
-		t.Fatalf("observation log = %q", logLines)
-	}
-	if strings.Contains(logLines[0], text) {
-		t.Fatalf("observation log contains note text: %q", logLines[0])
-	}
-}
-
 type fakeClient struct {
 	mu         sync.Mutex
 	self       domain.User
@@ -1639,22 +1621,6 @@ func testNote(id, userID, visibility string, createdAt time.Time) domain.Note {
 
 func testFollowing(id, followerID, followeeID string) domain.Following {
 	return domain.Following{ID: id, FollowerID: followerID, FolloweeID: followeeID}
-}
-
-func testLogger(lines *[]string) *slog.Logger {
-	return slog.New(slog.NewTextHandler(&lineWriter{lines: lines}, nil))
-}
-
-type lineWriter struct {
-	mu    sync.Mutex
-	lines *[]string
-}
-
-func (w *lineWriter) Write(data []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	*w.lines = append(*w.lines, string(data))
-	return len(data), nil
 }
 
 func mustBaseURL(t *testing.T) *url.URL {

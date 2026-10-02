@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/azuki774/azkey-bot/internal/domain"
-	"github.com/azuki774/azkey-bot/internal/roumu/polling"
+	"github.com/azuki774/azkey-bot/internal/roumu/bot"
 )
 
 type logCapture struct {
@@ -30,7 +30,7 @@ type logCapture struct {
 	stoppedOnce sync.Once
 }
 
-func TestReplyModeWiresHTTPClientAndRepository(t *testing.T) {
+func TestRunRepliesWithoutModeConfiguration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var mu sync.Mutex
@@ -67,7 +67,7 @@ func TestReplyModeWiresHTTPClientAndRepository(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	env := map[string]string{"MISSKEY_BASE_URL": server.URL, "MISSKEY_TOKEN": "test-secret", "POLLING_MODE": "reply", "POLL_RATE_PER_SECOND": "1000"}
+	env := map[string]string{"MISSKEY_BASE_URL": server.URL, "MISSKEY_TOKEN": "test-secret", "POLL_RATE_PER_SECOND": "1000"}
 	if err := run(ctx, mainMapLookup(env), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestRunStartsAndStopsOnContextCancellationWithEnvironmentOnlyConfig(t *test
 	done := make(chan error, 1)
 
 	go func() {
-		done <- runWithClientFactory(ctx, mainMapLookup(env), logger, func(*url.URL, string) (polling.Client, error) {
+		done <- runWithClientFactory(ctx, mainMapLookup(env), logger, func(*url.URL, string) (bot.ReplyClient, error) {
 			return mainTestClient{}, nil
 		})
 	}()
@@ -179,9 +179,7 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/i":
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "bot-id", "username": "bot", "name": nil, "host": nil})
-		case "/api/users/followers":
-			_ = json.NewEncoder(w).Encode([]any{})
-		case "/api/users/following":
+		case "/api/notes/mentions":
 			_ = json.NewEncoder(w).Encode([]any{})
 		default:
 			http.NotFound(w, r)
@@ -285,16 +283,16 @@ func (mainTestClient) Self(context.Context) (domain.User, error) {
 	return domain.User{ID: "bot-id", Username: "bot"}, nil
 }
 
-func (mainTestClient) ListFollowers(context.Context, string, domain.PageOptions) ([]domain.Following, error) {
-	return []domain.Following{}, nil
-}
-
-func (mainTestClient) ListFollowing(context.Context, string, domain.PageOptions) ([]domain.Following, error) {
-	return []domain.Following{}, nil
-}
-
-func (mainTestClient) ListUserNotes(context.Context, string, domain.NotePageOptions) ([]domain.Note, error) {
+func (mainTestClient) ListMentions(context.Context, domain.NotePageOptions) ([]domain.Note, error) {
 	return []domain.Note{}, nil
+}
+
+func (mainTestClient) IsFollowing(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (mainTestClient) CreateReply(context.Context, domain.Note, string) error {
+	return nil
 }
 
 func buildCLI(t *testing.T) string {

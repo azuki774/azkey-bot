@@ -1,4 +1,4 @@
-// Command azkey-roumu-bot observes mutual targets or answers check-in inquiries.
+// Command azkey-roumu-bot answers check-in inquiries.
 package main
 
 import (
@@ -40,12 +40,12 @@ func runMain() int {
 // environment lookup so the lifecycle can be tested without sending signals
 // or changing the process environment.
 func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) error {
-	return runWithClientFactory(ctx, getenv, logger, func(baseURL *url.URL, token string) (polling.Client, error) {
+	return runWithClientFactory(ctx, getenv, logger, func(baseURL *url.URL, token string) (bot.ReplyClient, error) {
 		return misskey.NewClient(baseURL, token)
 	})
 }
 
-type clientFactory func(*url.URL, string) (polling.Client, error)
+type clientFactory func(*url.URL, string) (bot.ReplyClient, error)
 
 func runWithClientFactory(ctx context.Context, getenv func(string) string, logger *slog.Logger, makeClient clientFactory) error {
 	if ctx == nil {
@@ -78,16 +78,7 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 	settings.StartupSpread = configured.StartupSpread
 	settings.BackoffBase = configured.BackoffBase
 	settings.BackoffMax = configured.BackoffMax
-	var consumer bot.Consumer
-	if configured.Mode == "reply" {
-		replyClient, ok := client.(bot.ReplyClient)
-		if !ok {
-			return errors.New("misskey client does not support replies")
-		}
-		consumer, err = bot.NewReplies(replyClient, &memory.Users{}, settings, logger)
-	} else {
-		consumer, err = polling.New(client, polling.ObservationHandler{Logger: logger}, polling.WithSettings(settings), polling.WithLogger(logger))
-	}
+	consumer, err := bot.NewReplies(client, &memory.Users{}, settings, logger)
 	if err != nil {
 		return err
 	}
@@ -97,7 +88,7 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 	}
 
 	if logger != nil {
-		logger.Info("azkey-roumu-bot started", "polling_mode", configured.Mode)
+		logger.Info("azkey-roumu-bot started")
 	}
 	if err := runner.Run(ctx); err != nil {
 		return err
