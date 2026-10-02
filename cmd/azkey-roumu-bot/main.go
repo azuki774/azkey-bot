@@ -1,4 +1,4 @@
-// Command azkey-roumu-bot observes public notes from mutual targets through read-only polling.
+// Command azkey-roumu-bot answers check-in inquiries.
 package main
 
 import (
@@ -10,10 +10,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/azuki774/azkey-bot/internal/domain"
 	"github.com/azuki774/azkey-bot/internal/misskey"
 	"github.com/azuki774/azkey-bot/internal/roumu/bot"
 	"github.com/azuki774/azkey-bot/internal/roumu/config"
 	"github.com/azuki774/azkey-bot/internal/roumu/polling"
+	"github.com/azuki774/azkey-bot/internal/roumu/repository/memory"
 )
 
 func main() {
@@ -47,12 +49,18 @@ func runMain() int {
 // environment lookup so the lifecycle can be tested without sending signals
 // or changing the process environment.
 func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) error {
-	return runWithClientFactory(ctx, getenv, logger, func(baseURL *url.URL, token string) (polling.Client, error) {
+	return runWithClientFactory(ctx, getenv, logger, func(baseURL *url.URL, token string) (applicationClient, error) {
 		return misskey.NewClient(baseURL, token)
 	})
 }
 
-type clientFactory func(*url.URL, string) (polling.Client, error)
+type applicationClient interface {
+	bot.ReplyClient
+	bot.FollowClient
+	polling.Client
+}
+
+type clientFactory func(*url.URL, string) (applicationClient, error)
 
 func runWithClientFactory(ctx context.Context, getenv func(string) string, logger *slog.Logger, makeClient clientFactory) error {
 	if ctx == nil {
@@ -90,31 +98,43 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 		return err
 	}
 	settings.RateLimiter = limiter
-	followClient, ok := client.(bot.FollowClient)
-	if !ok {
-		return errors.New("misskey client does not support follower synchronization")
-	}
 	followSyncSettings := bot.DefaultFollowSyncSettings()
 	followSyncSettings.MaxWritesPerSync = configured.FollowMaxWritesPerSync
 	followSyncSettings.WriteInterval = configured.FollowWriteInterval
 	followSyncSettings.BackoffBase = configured.BackoffBase
 	followSyncSettings.BackoffMax = configured.BackoffMax
-	followSynchronizer, err := bot.NewFollowerSynchronizer(followClient, limiter, followSyncSettings, logger)
+	followSynchronizer, err := bot.NewFollowerSynchronizer(client, limiter, followSyncSettings, logger)
 	if err != nil {
 		return err
 	}
 	settings.FollowerSynchronizer = followSynchronizer
-	poller, err := polling.New(client, polling.ObservationHandler{Logger: logger}, polling.WithSettings(settings), polling.WithLogger(logger))
+	// Follower polling owns relationship snapshots and fetch summaries. Note
+	// reactions belong to issue #10; inquiries use the independent mentions feed.
+	poller, err := polling.New(client, polling.NoteHandlerFunc(func(ctx context.Context, _ domain.Note) error {
+		return ctx.Err()
+	}), polling.WithSettings(settings), polling.WithLogger(logger))
 	if err != nil {
 		return err
 	}
-	runner, err := bot.NewRunner(poller)
+	replySettings := bot.DefaultReplySettings()
+	replySettings.PollInterval = configured.PollInterval
+	replySettings.PageLimit = configured.PageLimit
+	replySettings.MaxPagesPerTurn = configured.MaxPagesPerTurn
+	replySettings.RatePerSecond = configured.RatePerSecond
+	replySettings.BackoffBase = configured.BackoffBase
+	replySettings.BackoffMax = configured.BackoffMax
+	replySettings.RateLimiter = limiter
+	replies, err := bot.NewReplies(client, &memory.Users{}, replySettings, logger)
+	if err != nil {
+		return err
+	}
+	runner, err := bot.NewRunner(consumerGroup{poller, replies})
 	if err != nil {
 		return err
 	}
 
 	if logger != nil {
-		logger.Info("azkey-roumu-bot started", "polling_mode", configured.Mode)
+		logger.Info("azkey-roumu-bot started")
 	}
 	if err := runner.Run(ctx); err != nil {
 		return err
@@ -123,4 +143,25 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 		logger.Info("azkey-roumu-bot stopped")
 	}
 	return nil
+}
+
+// consumerGroup cancels sibling loops when one stops and joins all of them.
+type consumerGroup []bot.Consumer
+
+func (consumers consumerGroup) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan error, len(consumers))
+	for _, consumer := range consumers {
+		go func() { results <- consumer.Run(ctx) }()
+	}
+	var result error
+	for range consumers {
+		err := <-results
+		if err != nil && !errors.Is(err, context.Canceled) && result == nil {
+			result = err
+		}
+		cancel()
+	}
+	return result
 }

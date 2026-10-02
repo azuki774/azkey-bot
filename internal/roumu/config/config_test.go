@@ -114,7 +114,7 @@ func TestLoadFromEnvPollingDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("LoadFromEnv returned error: %v", err)
 	}
 	defaults := cfg.Polling()
-	if defaults.Mode != "observe" || defaults.PollInterval != time.Minute || defaults.FollowerSyncInterval != 10*time.Minute || defaults.FollowWriteInterval != time.Minute || defaults.FollowMaxWritesPerSync != 10 || defaults.Concurrency != 2 || defaults.RatePerSecond != 2 || defaults.RateBurst != 1 || defaults.PageLimit != 100 || defaults.MaxPagesPerTurn != 5 || defaults.DedupLimit != 10_000 || defaults.DedupTTL != 24*time.Hour || defaults.StartupSpread != time.Minute || defaults.BackoffBase != time.Second || defaults.BackoffMax != 5*time.Minute {
+	if defaults.PollInterval != time.Minute || defaults.FollowerSyncInterval != 10*time.Minute || defaults.FollowWriteInterval != time.Minute || defaults.FollowMaxWritesPerSync != 10 || defaults.Concurrency != 2 || defaults.RatePerSecond != 2 || defaults.RateBurst != 1 || defaults.PageLimit != 100 || defaults.MaxPagesPerTurn != 5 || defaults.DedupLimit != 10_000 || defaults.DedupTTL != 24*time.Hour || defaults.StartupSpread != time.Minute || defaults.BackoffBase != time.Second || defaults.BackoffMax != 5*time.Minute {
 		t.Fatalf("polling defaults = %+v", defaults)
 	}
 
@@ -122,7 +122,6 @@ func TestLoadFromEnvPollingDefaultsAndOverrides(t *testing.T) {
 	for key, value := range base {
 		overrides[key] = value
 	}
-	overrides["POLLING_MODE"] = "observe"
 	overrides["POLL_INTERVAL"] = "17s"
 	overrides["FOLLOWER_SYNC_INTERVAL"] = "19m"
 	overrides["FOLLOW_WRITE_INTERVAL"] = "75s"
@@ -142,7 +141,7 @@ func TestLoadFromEnvPollingDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("LoadFromEnv with overrides returned error: %v", err)
 	}
 	got := cfg.Polling()
-	if got.Mode != "observe" || got.PollInterval != 17*time.Second || got.FollowerSyncInterval != 19*time.Minute || got.FollowWriteInterval != 75*time.Second || got.FollowMaxWritesPerSync != 6 || got.Concurrency != 4 || got.RatePerSecond != 3.5 || got.RateBurst != 2 || got.PageLimit != 50 || got.MaxPagesPerTurn != 7 || got.DedupLimit != 123 || got.DedupTTL != 2*time.Hour || got.StartupSpread != 3*time.Second || got.BackoffBase != 2*time.Second || got.BackoffMax != time.Minute {
+	if got.PollInterval != 17*time.Second || got.FollowerSyncInterval != 19*time.Minute || got.FollowWriteInterval != 75*time.Second || got.FollowMaxWritesPerSync != 6 || got.Concurrency != 4 || got.RatePerSecond != 3.5 || got.RateBurst != 2 || got.PageLimit != 50 || got.MaxPagesPerTurn != 7 || got.DedupLimit != 123 || got.DedupTTL != 2*time.Hour || got.StartupSpread != 3*time.Second || got.BackoffBase != 2*time.Second || got.BackoffMax != time.Minute {
 		t.Fatalf("polling overrides = %+v", got)
 	}
 }
@@ -189,7 +188,6 @@ func TestLoadFromEnvRejectsInvalidPollingSettings(t *testing.T) {
 		key   string
 		value string
 	}{
-		{name: "unsupported mode", key: "POLLING_MODE", value: "write"},
 		{name: "invalid log level", key: "LOG_LEVEL", value: "debug-with-private-value"},
 		{name: "invalid duration", key: "POLL_INTERVAL", value: "soon"},
 		{name: "zero duration", key: "POLL_INTERVAL", value: "0s"},

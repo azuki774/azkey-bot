@@ -30,7 +30,7 @@ func TestRunReturnsAfterCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
-	poller, err := New(client, ObservationHandler{})
+	poller, err := New(client, NoteHandlerFunc(func(ctx context.Context, _ domain.Note) error { return ctx.Err() }))
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -1590,22 +1590,6 @@ func TestRunCanBeStartedAgainAfterCancellation(t *testing.T) {
 	}
 }
 
-func TestObservationHandlerDoesNotExposeNoteText(t *testing.T) {
-	var logLines []string
-	logger := testLogger(&logLines)
-	handler := ObservationHandler{Logger: logger}
-	text := "private note content that must not be logged"
-	if err := handler.HandleNote(context.Background(), domain.Note{ID: "n1", UserID: "f1", Text: &text}); err != nil {
-		t.Fatalf("HandleNote returned error: %v", err)
-	}
-	if len(logLines) != 1 || !strings.Contains(logLines[0], "n1") {
-		t.Fatalf("observation log = %q", logLines)
-	}
-	if strings.Contains(logLines[0], text) {
-		t.Fatalf("observation log contains note text: %q", logLines[0])
-	}
-}
-
 func TestFetchSummarySeparatesSuccessFailureIdleAndCancellation(t *testing.T) {
 	summary := newFetchSummary()
 	summary.begin(fetchOperationSelf)
@@ -2025,10 +2009,6 @@ func testNote(id, userID, visibility string, createdAt time.Time) domain.Note {
 
 func testFollowing(id, followerID, followeeID string) domain.Following {
 	return domain.Following{ID: id, FollowerID: followerID, FolloweeID: followeeID}
-}
-
-func testLogger(lines *[]string) *slog.Logger {
-	return slog.New(slog.NewTextHandler(&lineWriter{lines: lines}, nil))
 }
 
 type lineWriter struct {

@@ -18,7 +18,6 @@ var (
 	errBaseURLRequired   = errors.New("MISSKEY_BASE_URL is required")
 	errBaseURLInvalid    = errors.New("MISSKEY_BASE_URL must be an absolute HTTP or HTTPS URL without userinfo, query, or fragment")
 	errTokenRequired     = errors.New("MISSKEY_TOKEN is required")
-	errPollingMode       = errors.New("POLLING_MODE must be observe")
 	errPollingSetting    = errors.New("polling setting is invalid")
 	errLogLevel          = errors.New("LOG_LEVEL must be DEBUG, INFO, WARN, or ERROR")
 )
@@ -28,7 +27,6 @@ var (
 // enough for about 100 mutual targets while keeping ordinary observation latency
 // near one or two minutes.
 type PollingSettings struct {
-	Mode                   string
 	PollInterval           time.Duration
 	FollowerSyncInterval   time.Duration
 	FollowWriteInterval    time.Duration
@@ -125,7 +123,6 @@ func (c Config) Polling() PollingSettings {
 
 func loadPollingSettings(getenv func(string) string) (PollingSettings, error) {
 	settings := PollingSettings{
-		Mode:                   "observe",
 		PollInterval:           time.Minute,
 		FollowerSyncInterval:   10 * time.Minute,
 		FollowWriteInterval:    time.Minute,
@@ -140,13 +137,6 @@ func loadPollingSettings(getenv func(string) string) (PollingSettings, error) {
 		StartupSpread:          time.Minute,
 		BackoffBase:            time.Second,
 		BackoffMax:             5 * time.Minute,
-	}
-
-	if value := strings.TrimSpace(getenv("POLLING_MODE")); value != "" {
-		settings.Mode = value
-	}
-	if settings.Mode != "observe" {
-		return PollingSettings{}, errPollingMode
 	}
 
 	var err error
