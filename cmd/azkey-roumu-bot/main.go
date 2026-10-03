@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/azuki774/azkey-bot/internal/domain"
 	"github.com/azuki774/azkey-bot/internal/misskey"
 	"github.com/azuki774/azkey-bot/internal/roumu/bot"
 	"github.com/azuki774/azkey-bot/internal/roumu/config"
@@ -55,6 +54,7 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) e
 }
 
 type applicationClient interface {
+	bot.ReactionClient
 	bot.ReplyClient
 	bot.FollowClient
 	polling.Client
@@ -108,11 +108,12 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 		return err
 	}
 	settings.FollowerSynchronizer = followSynchronizer
-	// Follower polling owns relationship snapshots and fetch summaries. Note
-	// reactions belong to issue #10; inquiries use the independent mentions feed.
-	poller, err := polling.New(client, polling.NoteHandlerFunc(func(ctx context.Context, _ domain.Note) error {
-		return ctx.Err()
-	}), polling.WithSettings(settings), polling.WithLogger(logger))
+	users := &memory.Users{}
+	checkins, err := bot.NewCheckIns(client, users, limiter, bot.DefaultCheckInSettings(), logger)
+	if err != nil {
+		return err
+	}
+	poller, err := polling.New(client, checkins, polling.WithSettings(settings), polling.WithLogger(logger))
 	if err != nil {
 		return err
 	}
@@ -124,7 +125,7 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 	replySettings.BackoffBase = configured.BackoffBase
 	replySettings.BackoffMax = configured.BackoffMax
 	replySettings.RateLimiter = limiter
-	replies, err := bot.NewReplies(client, &memory.Users{}, replySettings, logger)
+	replies, err := bot.NewReplies(client, users, replySettings, logger)
 	if err != nil {
 		return err
 	}
