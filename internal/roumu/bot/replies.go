@@ -165,9 +165,15 @@ func (r *Replies) poll(ctx context.Context) error {
 	return nil
 }
 
-func (r *Replies) handle(ctx context.Context, note domain.Note) error {
+func (r *Replies) isEligibleMention(note domain.Note) bool {
 	// ListMentions already restricts notes to mentions of the authenticated bot.
-	if note.Visibility != "public" || note.ChannelID != "" || note.UserID == r.selfID || note.User == nil || note.User.IsBot || note.User.ID != note.UserID {
+	return note.Visibility == "public" && note.ChannelID == "" &&
+		note.UserID != r.selfID && note.User != nil &&
+		!note.User.IsBot && note.User.ID == note.UserID
+}
+
+func (r *Replies) handle(ctx context.Context, note domain.Note) error {
+	if !r.isEligibleMention(note) {
 		return nil
 	}
 	// Space all writes, including failures, below upstream's 300/hour limit.
