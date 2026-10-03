@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// ListMentions includes non-followed users. The caller selects direct replies.
+// ListMentions returns mentions of the authenticated user, including non-followed users.
 // Checked against upstream Misskey 2026.9.0 notes/mentions.ts: sinceId/date
 // requests are ascending; without them the latest notes are returned first.
 func (c *Client) ListMentions(ctx context.Context, options domain.NotePageOptions) ([]domain.Note, error) {

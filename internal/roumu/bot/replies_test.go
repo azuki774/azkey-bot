@@ -96,8 +96,6 @@ func TestRepliesMissingStateAndEligibility(t *testing.T) {
 		func(n *domain.Note) { n.Visibility = "specified" },
 		func(n *domain.Note) { n.Visibility = "home" },
 		func(n *domain.Note) { n.Visibility = "followers" },
-		func(n *domain.Note) { n.ReplyID = "" },
-		func(n *domain.Note) { n.ReplyUserID = "someone" },
 		func(n *domain.Note) { n.UserID = "bot" },
 		func(n *domain.Note) { n.User.IsBot = true },
 		func(n *domain.Note) { n.User = nil },
@@ -117,6 +115,35 @@ func TestRepliesMissingStateAndEligibility(t *testing.T) {
 	}
 	if f.texts[0] != "連続チェックイン回数: 0連勤、チェックイン回数: 0 日" {
 		t.Fatal(f.texts)
+	}
+}
+
+func TestRepliesAnswerMentionsRegardlessOfReplyTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name, replyID, replyUserID string
+	}{
+		{name: "new post"},
+		{name: "reply to bot", replyID: "parent", replyUserID: "bot"},
+		{name: "reply to another user", replyID: "parent", replyUserID: "someone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			note := inquiry("01")
+			note.ReplyID, note.ReplyUserID = tc.replyID, tc.replyUserID
+			f := &replyFake{notes: []domain.Note{note}}
+			r := replyFixture(t, f, &memory.Users{})
+			if err := r.poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(f.sent) != 1 || f.sent[0] != note.ID || f.texts[0] != "あなたはメンバーではありません" {
+				t.Fatalf("sent=%v texts=%v", f.sent, f.texts)
+			}
+			if err := r.poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(f.sent) != 1 {
+				t.Fatal("mention answered more than once")
+			}
+		})
 	}
 }
 
