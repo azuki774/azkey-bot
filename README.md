@@ -59,7 +59,10 @@ go run ./cmd/azkey-roumu-bot
 
 - bot のフォロワーの公開投稿本文に「ログボ」「ログインボーナス」「出勤」のいずれかが
   含まれていればチェックインします。文字列はそのまま部分一致で判定し、CW は判定しません。
-  ルールとリアクションは `internal/roumu/bot/checkins.go` の `DefaultCheckInSettings` で保持します。
+  区切り時刻と反応ワードは [`internal/domain/checkin_rules.go`](internal/domain/checkin_rules.go) で変更し、
+  ビルド・再デプロイで反映します。`CheckInDayStart` が JST の区切り時刻
+  （例: `4*time.Hour + 30*time.Minute` で04:30）、`DefaultCheckInKeywords` が反応ワードの一覧です。
+  区切り時刻は記録と連続日数の照会に共通で使います。以下は既定値での説明です。
 - 通常投稿・引用の投稿者自身の本文・公開リプライが対象です。本文なしリノート、
   bot アカウント・bot 自身・チャンネルの投稿は対象外です。
 - 投稿日時の JST 05:00 区切りで1日1回、累計日数・連続日数・最終チェックイン日時を保存し、

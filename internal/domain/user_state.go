@@ -14,10 +14,10 @@ type UserState struct {
 	LastCheckInAt   time.Time
 }
 
-// CheckInDay returns the beginning of the JST 05:00 business day.
+// CheckInDay returns the beginning of the JST business day using CheckInDayStart.
 func CheckInDay(at time.Time) time.Time {
-	local := at.In(time.FixedZone("JST", 9*60*60)).Add(-5 * time.Hour)
-	return time.Date(local.Year(), local.Month(), local.Day(), 5, 0, 0, 0, local.Location())
+	local := at.In(time.FixedZone("JST", 9*60*60)).Add(-CheckInDayStart)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location()).Add(CheckInDayStart)
 }
 
 // CurrentStreak expires only after an entire day without a check-in.

@@ -23,7 +23,7 @@ type CheckInSettings struct {
 }
 
 func DefaultCheckInSettings() CheckInSettings {
-	return CheckInSettings{Keywords: []string{"ログボ", "ログインボーナス", "出勤"}, Reaction: "✅"}
+	return CheckInSettings{Keywords: domain.DefaultCheckInKeywords(), Reaction: "✅"}
 }
 
 // CheckIns consumes follower notes selected by polling, which excludes self
