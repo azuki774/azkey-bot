@@ -358,6 +358,86 @@ func TestCLIHandlesSIGTERMAndInvalidConfig(t *testing.T) {
 
 type mainTestClient struct{}
 
+type checkInApplicationClient struct {
+	mainTestClient
+	t       *testing.T
+	reacted chan struct{}
+	cancel  context.CancelFunc
+	reply   string
+}
+
+func (c *checkInApplicationClient) ListFollowers(_ context.Context, _ string, options domain.PageOptions) ([]domain.Following, error) {
+	if options.UntilID != "" || options.SinceID != "" {
+		return []domain.Following{}, nil
+	}
+	return []domain.Following{{ID: "relationship", FollowerID: "member", FolloweeID: "bot-id"}}, nil
+}
+
+func (c *checkInApplicationClient) ListFollowing(ctx context.Context, id string, options domain.PageOptions) ([]domain.Following, error) {
+	if options.UntilID != "" || options.SinceID != "" {
+		return []domain.Following{}, nil
+	}
+	return []domain.Following{{ID: "relationship", FollowerID: "bot-id", FolloweeID: "member"}}, nil
+}
+
+func (c *checkInApplicationClient) ListUserNotes(_ context.Context, _ string, options domain.NotePageOptions) ([]domain.Note, error) {
+	if options.SinceDate == nil || options.SinceID != "" {
+		return []domain.Note{}, nil
+	}
+	text := "ログインボーナス"
+	return []domain.Note{{ID: "checkin", UserID: "member", User: &domain.User{ID: "member"}, Text: &text, Visibility: "public", CreatedAt: time.Now()}}, nil
+}
+
+func (c *checkInApplicationClient) CreateReaction(_ context.Context, id, reaction string) error {
+	if id != "checkin" || reaction != "✅" {
+		c.t.Errorf("reaction: %s %s", id, reaction)
+	}
+	select {
+	case <-c.reacted:
+		c.t.Error("duplicate reaction")
+	default:
+		close(c.reacted)
+	}
+	return nil
+}
+
+func (c *checkInApplicationClient) ListMentions(ctx context.Context, _ domain.NotePageOptions) ([]domain.Note, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.reacted:
+	}
+	return []domain.Note{{ID: "inquiry", UserID: "member", User: &domain.User{ID: "member"}, Visibility: "public", CreatedAt: time.Now()}}, nil
+}
+
+func (c *checkInApplicationClient) IsFollowing(context.Context, string) (bool, error) {
+	return true, nil
+}
+
+func (c *checkInApplicationClient) CreateReply(_ context.Context, _ domain.Note, text string) error {
+	c.reply = text
+	c.cancel()
+	return nil
+}
+
+func TestRunSharesCheckInsWithInquiries(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := &checkInApplicationClient{t: t, reacted: make(chan struct{}), cancel: cancel}
+	env := map[string]string{"MISSKEY_BASE_URL": "https://example.test", "MISSKEY_TOKEN": "test-token", "POLL_INTERVAL": "1ms", "POLL_STARTUP_SPREAD": "0s", "POLL_RATE_PER_SECOND": "10000"}
+	err := runWithClientFactory(ctx, mainMapLookup(env), nil, func(*url.URL, string) (applicationClient, error) { return client, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.reply != "連続チェックイン回数: 1連勤、チェックイン回数: 1 日" {
+		t.Fatalf("reply = %q", client.reply)
+	}
+}
+
+func (mainTestClient) CreateReaction(ctx context.Context, _, _ string) error {
+	return ctx.Err()
+}
+
 func (mainTestClient) Self(context.Context) (domain.User, error) {
 	return domain.User{ID: "bot-id", Username: "bot"}, nil
 }
