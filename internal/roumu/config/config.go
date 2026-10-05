@@ -50,6 +50,7 @@ type Config struct {
 	baseURL *url.URL
 	token   string
 	polling PollingSettings
+	kvs     KVSSettings
 }
 
 // Load reads the process environment.
@@ -82,7 +83,11 @@ func LoadFromEnv(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{baseURL: baseURL, token: token, polling: polling}, nil
+	kvs, err := loadKVSSettings(getenv)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{baseURL: baseURL, token: token, polling: polling, kvs: kvs}, nil
 }
 
 // ParseLogLevel parses LOG_LEVEL without including its value in errors.
