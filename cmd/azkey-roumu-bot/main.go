@@ -14,7 +14,6 @@ import (
 	"github.com/azuki774/azkey-bot/internal/roumu/bot"
 	"github.com/azuki774/azkey-bot/internal/roumu/config"
 	"github.com/azuki774/azkey-bot/internal/roumu/polling"
-	"github.com/azuki774/azkey-bot/internal/roumu/repository/memory"
 )
 
 func main() {
@@ -108,7 +107,14 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 		return err
 	}
 	settings.FollowerSynchronizer = followSynchronizer
-	users := &memory.Users{}
+	users, closeUsers, err := openUsers(ctx, cfg.KVS())
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	defer closeUsers()
 	checkins, err := bot.NewCheckIns(client, users, limiter, bot.DefaultCheckInSettings(), logger)
 	if err != nil {
 		return err
@@ -135,7 +141,7 @@ func runWithClientFactory(ctx context.Context, getenv func(string) string, logge
 	}
 
 	if logger != nil {
-		logger.Info("azkey-roumu-bot started")
+		logger.Info("azkey-roumu-bot started", "kvs_backend", cfg.KVS().Backend)
 	}
 	if err := runner.Run(ctx); err != nil {
 		return err
