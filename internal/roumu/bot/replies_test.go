@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func (f *replyFake) CreateReply(_ context.Context, n domain.Note, text string) e
 }
 
 func inquiry(id string) domain.Note {
-	return domain.Note{ID: id, UserID: "user", User: &domain.User{ID: "user"}, Visibility: "public", ReplyID: "parent", ReplyUserID: "bot"}
+	return domain.Note{ID: id, UserID: "user", User: &domain.User{ID: "user", Username: "user"}, Visibility: "public", ReplyID: "parent", ReplyUserID: "bot"}
 }
 func replyFixture(t *testing.T, f *replyFake, repo UserStateRepository) *Replies {
 	t.Helper()
@@ -63,6 +64,112 @@ func replyFixture(t *testing.T, f *replyFake, repo UserStateRepository) *Replies
 	return r
 }
 
+func TestFormatAttendanceReply(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, jst)
+	beforeBoundary := time.Date(2026, 10, 2, 4, 59, 59, 0, jst)
+	afterBoundary := time.Date(2026, 10, 2, 5, 0, 0, 0, jst)
+	emptyHost := ""
+	remoteHost := "remote.example"
+	tests := []struct {
+		name  string
+		user  domain.User
+		state domain.UserState
+		now   time.Time
+		want  []string
+	}{
+		{
+			name:  "nil host is local and today's check-in is recorded",
+			user:  domain.User{Username: "alice"},
+			state: domain.UserState{CheckInDays: 7, ConsecutiveDays: 4, LastCheckInAt: now},
+			now:   now,
+			want: []string{
+				"@alice さんの勤怠情報📊",
+				"📓 ユーザ種別: 正社員",
+				"🔥 連続出勤: 4連勤",
+				"📈 累計出勤: 7日",
+				"📅 今日の出勤: 出勤済み",
+			},
+		},
+		{
+			name:  "empty host is local and missing state is empty",
+			user:  domain.User{Username: "alice", Host: &emptyHost},
+			state: domain.UserState{},
+			now:   now,
+			want: []string{
+				"@alice さんの勤怠情報📊",
+				"📓 ユーザ種別: 正社員",
+				"🔥 連続出勤: 0連勤",
+				"📈 累計出勤: 0日",
+				"📅 今日の出勤: まだありません",
+			},
+		},
+		{
+			name: "remote host is qualified and prior-day check-in keeps streak",
+			user: domain.User{Username: "alice", Host: &remoteHost},
+			state: domain.UserState{
+				CheckInDays: 9, ConsecutiveDays: 3, LastCheckInAt: now.Add(-24 * time.Hour),
+			},
+			now: now,
+			want: []string{
+				"@alice@remote.example さんの勤怠情報📊",
+				"📓 ユーザ種別: パートナー",
+				"🔥 連続出勤: 3連勤",
+				"📈 累計出勤: 9日",
+				"📅 今日の出勤: まだありません",
+			},
+		},
+		{
+			name:  "expired streak is zero while cumulative days remain",
+			user:  domain.User{Username: "alice"},
+			state: domain.UserState{CheckInDays: 10, ConsecutiveDays: 5, LastCheckInAt: now.Add(-48 * time.Hour)},
+			now:   now,
+			want: []string{
+				"@alice さんの勤怠情報📊",
+				"📓 ユーザ種別: 正社員",
+				"🔥 連続出勤: 0連勤",
+				"📈 累計出勤: 10日",
+				"📅 今日の出勤: まだありません",
+			},
+		},
+		{
+			name:  "one second before JST boundary is the previous business day",
+			user:  domain.User{Username: "alice", Host: &emptyHost},
+			state: domain.UserState{CheckInDays: 5, ConsecutiveDays: 2, LastCheckInAt: beforeBoundary},
+			now:   beforeBoundary,
+			want: []string{
+				"@alice さんの勤怠情報📊",
+				"📓 ユーザ種別: 正社員",
+				"🔥 連続出勤: 2連勤",
+				"📈 累計出勤: 5日",
+				"📅 今日の出勤: 出勤済み",
+			},
+		},
+		{
+			name:  "at JST boundary the previous check-in is not today",
+			user:  domain.User{Username: "alice", Host: &emptyHost},
+			state: domain.UserState{CheckInDays: 5, ConsecutiveDays: 2, LastCheckInAt: beforeBoundary},
+			now:   afterBoundary,
+			want: []string{
+				"@alice さんの勤怠情報📊",
+				"📓 ユーザ種別: 正社員",
+				"🔥 連続出勤: 2連勤",
+				"📈 累計出勤: 5日",
+				"📅 今日の出勤: まだありません",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatAttendanceReply(tc.user, tc.state, tc.now)
+			want := strings.Join(tc.want, "\n")
+			if got != want {
+				t.Fatalf("reply = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestRepliesMembershipAndReadOnlyState(t *testing.T) {
 	for _, member := range []bool{false, true} {
 		f := &replyFake{member: member}
@@ -76,11 +183,17 @@ func TestRepliesMembershipAndReadOnlyState(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := "あなたはメンバーではありません"
-		if member {
-			want = "連続チェックイン回数: 3連勤、チェックイン回数: 12 日"
+		if len(f.texts) != 1 {
+			t.Fatalf("replies: %v", f.texts)
 		}
-		if len(f.texts) != 1 || f.texts[0] != want {
-			t.Fatalf("reply: %v", f.texts)
+		if member {
+			for _, expected := range []string{"🔥 連続出勤: 3連勤", "📈 累計出勤: 12日", "📅 今日の出勤: 出勤済み"} {
+				if !strings.Contains(f.texts[0], expected) {
+					t.Fatalf("reply %q is missing %q", f.texts[0], expected)
+				}
+			}
+		} else if f.texts[0] != want {
+			t.Fatalf("reply = %q", f.texts[0])
 		}
 		got, _ := repo.Get(context.Background(), "user")
 		if got != state {
@@ -113,8 +226,10 @@ func TestRepliesMissingStateAndEligibility(t *testing.T) {
 	if err := r.handle(context.Background(), inquiry("02")); err != nil {
 		t.Fatal(err)
 	}
-	if f.texts[0] != "連続チェックイン回数: 0連勤、チェックイン回数: 0 日" {
-		t.Fatal(f.texts)
+	for _, expected := range []string{"🔥 連続出勤: 0連勤", "📈 累計出勤: 0日", "📅 今日の出勤: まだありません"} {
+		if !strings.Contains(f.texts[0], expected) {
+			t.Fatalf("reply %q is missing %q", f.texts[0], expected)
+		}
 	}
 }
 

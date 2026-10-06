@@ -79,8 +79,17 @@ func TestRunRepliesWithoutModeConfiguration(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if reply["replyId"] != "inquiry" || reply["visibility"] != "public" || reply["text"] != "連続チェックイン回数: 0連勤、チェックイン回数: 0 日" {
+	if reply["replyId"] != "inquiry" || reply["visibility"] != "public" {
 		t.Fatalf("reply: %v", reply)
+	}
+	text, ok := reply["text"].(string)
+	if !ok {
+		t.Fatalf("reply text is not a string: %v", reply)
+	}
+	for _, expected := range []string{"@member さんの勤怠情報📊", "📓 ユーザ種別: 正社員", "🔥 連続出勤: 0連勤", "📈 累計出勤: 0日", "📅 今日の出勤: まだありません"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("reply %q is missing %q", text, expected)
+		}
 	}
 }
 
@@ -385,7 +394,7 @@ func (c *checkInApplicationClient) ListUserNotes(_ context.Context, _ string, op
 		return []domain.Note{}, nil
 	}
 	text := "ログインボーナス"
-	return []domain.Note{{ID: "checkin", UserID: "member", User: &domain.User{ID: "member"}, Text: &text, Visibility: "public", CreatedAt: time.Now()}}, nil
+	return []domain.Note{{ID: "checkin", UserID: "member", User: &domain.User{ID: "member", Username: "member"}, Text: &text, Visibility: "public", CreatedAt: time.Now()}}, nil
 }
 
 func (c *checkInApplicationClient) CreateReaction(_ context.Context, id, reaction string) error {
@@ -407,7 +416,7 @@ func (c *checkInApplicationClient) ListMentions(ctx context.Context, _ domain.No
 		return nil, ctx.Err()
 	case <-c.reacted:
 	}
-	return []domain.Note{{ID: "inquiry", UserID: "member", User: &domain.User{ID: "member"}, Visibility: "public", CreatedAt: time.Now()}}, nil
+	return []domain.Note{{ID: "inquiry", UserID: "member", User: &domain.User{ID: "member", Username: "member"}, Visibility: "public", CreatedAt: time.Now()}}, nil
 }
 
 func (c *checkInApplicationClient) IsFollowing(context.Context, string) (bool, error) {
@@ -429,8 +438,10 @@ func TestRunSharesCheckInsWithInquiries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.reply != "連続チェックイン回数: 1連勤、チェックイン回数: 1 日" {
-		t.Fatalf("reply = %q", client.reply)
+	for _, expected := range []string{"🔥 連続出勤: 1連勤", "📈 累計出勤: 1日"} {
+		if !strings.Contains(client.reply, expected) {
+			t.Fatalf("reply %q is missing %q", client.reply, expected)
+		}
 	}
 }
 
@@ -514,7 +525,7 @@ func (c *mainObserveClient) ListMentions(ctx context.Context, options domain.Not
 	if options.SinceID != "" {
 		return []domain.Note{}, nil
 	}
-	return []domain.Note{{ID: "inquiry", UserID: "visitor", User: &domain.User{ID: "visitor"}, Visibility: "public", ReplyID: "parent", ReplyUserID: "bot"}}, nil
+	return []domain.Note{{ID: "inquiry", UserID: "visitor", User: &domain.User{ID: "visitor", Username: "visitor"}, Visibility: "public", ReplyID: "parent", ReplyUserID: "bot"}}, nil
 }
 
 func (c *mainObserveClient) CreateReply(ctx context.Context, note domain.Note, text string) error {

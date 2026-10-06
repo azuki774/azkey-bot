@@ -49,8 +49,10 @@ func TestRunPersistsCheckInsAndSharesStateWithInquiries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.reply != "連続チェックイン回数: 3連勤、チェックイン回数: 5 日" {
-		t.Fatalf("reply = %q", client.reply)
+	for _, expected := range []string{"🔥 連続出勤: 3連勤", "📈 累計出勤: 5日"} {
+		if !strings.Contains(client.reply, expected) {
+			t.Fatalf("reply %q is missing %q", client.reply, expected)
+		}
 	}
 	users, closeUsers, err = openUsers(context.Background(), cfg.KVS())
 	if err != nil {

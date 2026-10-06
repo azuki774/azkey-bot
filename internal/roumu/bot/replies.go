@@ -172,6 +172,22 @@ func (r *Replies) isEligibleMention(note domain.Note) bool {
 		!note.User.IsBot && note.User.ID == note.UserID
 }
 
+func formatAttendanceReply(user domain.User, state domain.UserState, now time.Time) string {
+	account := user.Username
+	kind := "正社員"
+	if user.Host != nil && *user.Host != "" {
+		account += "@" + *user.Host
+		kind = "パートナー"
+	}
+	today := "まだありません"
+	if !state.LastCheckInAt.IsZero() &&
+		domain.CheckInDay(state.LastCheckInAt).Equal(domain.CheckInDay(now)) {
+		today = "出勤済み"
+	}
+	return fmt.Sprintf("@%s さんの勤怠情報📊\n📓 ユーザ種別: %s\n🔥 連続出勤: %d連勤\n📈 累計出勤: %d日\n📅 今日の出勤: %s",
+		account, kind, state.CurrentStreak(now), state.CheckInDays, today)
+}
+
 func (r *Replies) handle(ctx context.Context, note domain.Note) error {
 	if !r.isEligibleMention(note) {
 		return nil
@@ -194,7 +210,8 @@ func (r *Replies) handle(ctx context.Context, note domain.Note) error {
 		if err != nil && !errors.Is(err, domain.ErrUserStateNotFound) {
 			return err
 		}
-		text = fmt.Sprintf("連続チェックイン回数: %d連勤、チェックイン回数: %d 日", state.CurrentStreak(r.settings.Clock()), state.CheckInDays)
+		now := r.settings.Clock()
+		text = formatAttendanceReply(*note.User, state, now)
 	}
 	if err := r.waitRequest(ctx); err != nil {
 		return err
